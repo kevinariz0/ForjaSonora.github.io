@@ -189,12 +189,13 @@ kbd{border:1px solid var(--line-bright); padding:0 4px; font-size:10px; color:va
   <div id="topbar">
     <button id="btn-drawer-tracks" title="Pistas">☰</button>
     <span class="logo">FORJA <b>SONORA</b></span>
-    <span class="sub">compón · sintetiza · exporta código — Web Audio API, sin archivos de audio</span>
+    <span class="sub">compón · sintetiza · exporta código — Web Audio API · v7</span>
     <span class="spacer"></span>
     <span class="field">Proyecto <input type="text" id="proj-name" value="tema-sin-titulo" style="width:150px;text-align:left"></span>
     <button id="btn-library">Proyectos</button>
     <button id="btn-presets">Presets</button>
     <button id="btn-import">Importar</button>
+    <button id="btn-audio-in" title="Importar audio WAV/MP3: transcribir, detectar BPM, pista de referencia">Audio ⭳</button>
     <button class="acc" id="btn-export">Exportar</button>
     <button id="btn-help">?</button>
     <button id="btn-drawer-side" title="Instrumento y mezcla">⚙</button>
@@ -253,7 +254,7 @@ kbd{border:1px solid var(--line-bright); padding:0 4px; font-size:10px; color:va
         <span class="spacer"></span>
         <span class="hint" id="roll-track-label" style="color:var(--ink-dim);font-size:11px"></span>
       </div>
-      <div id="roll-scroll"><canvas id="roll-canvas"></canvas></div>
+      <div id="roll-scroll"><canvas id="roll-canvas"></canvas><canvas id="playhead-canvas" style="position:absolute;top:0;left:0;pointer-events:none"></canvas></div>
       <div id="auto-lane-wrap"><div id="auto-scroll"><canvas id="auto-canvas" height="64"></canvas></div></div>
       <div id="note-inspector"><span id="insp-text">— sin nota seleccionada — clic en la rejilla para dibujar</span>
         <span class="vel-wrap" id="insp-vel" style="display:none">Vel <input type="range" id="in-vel" min="0.05" max="1" step="0.05" value="1"><span id="vel-val">100</span></span>
@@ -344,13 +345,62 @@ kbd{border:1px solid var(--line-bright); padding:0 4px; font-size:10px; color:va
   </div>
 </div></div>
 
+<!-- ══════════ MODAL IMPORTAR AUDIO ══════════ -->
+<div class="modal-bg" id="modal-audio-in"><div class="modal" style="width:min(720px,95vw)">
+  <div class="m-title">IMPORTAR AUDIO (ingeniería inversa) <span class="close" data-close="modal-audio-in">✕</span></div>
+  <div class="m-body">
+    <div class="note">Carga un <b>WAV o MP3</b> y la Forja lo analiza localmente (sin subir nada). Puede <b>transcribir la melodía a notas</b>,
+      <b>detectar el BPM</b> y dejar el audio como <b>pista de referencia</b> que suena mientras compones encima.
+      La transcripción usa el algoritmo <b>YIN</b> (detección de tono monofónico) con separación de notas repetidas.
+      Funciona bien con <b>melodías de una sola voz</b> (canto, silbido, un bajo, una flauta, un solo de sintetizador); no separa mezclas completas ni acordes.
+      Elige el <b>tipo de sonido</b> según tu audio (grave, agudo, general) para acertar el rango; ajusta la <b>sensibilidad</b> si detecta pocas o demasiadas notas. El análisis corre por bloques con progreso, sin congelar la página.
+      Si detecta pocas notas, sube la <b>sensibilidad</b>; si las junta o parte de más, ajusta la <b>duración mínima</b>. El análisis corre por bloques, así que archivos largos muestran progreso sin congelar la página.</div>
+    <div style="margin:8px 0"><button class="acc" id="btn-load-audio" style="font-size:14px;padding:8px 18px">▲ Elegir archivo de audio…</button>
+      <input type="file" id="audio-file-input" accept="audio/*,.wav,.mp3,.ogg,.m4a" style="display:none">
+      <span id="ain-name" style="margin-left:10px;color:var(--ink-dim);font-size:12px"></span></div>
+
+    <div id="ain-analysis" style="display:none">
+      <div style="border:1px solid var(--line-bright);background:var(--bg);margin:8px 0">
+        <canvas id="ain-wave" height="90" style="display:block;width:100%"></canvas>
+      </div>
+      <div class="ctl-row"><label style="min-width:120px">Duración</label><span id="ain-dur" style="color:var(--ink)"></span>
+        <span style="margin-left:16px;color:var(--ink-dim)">BPM detectado:</span> <b id="ain-bpm" style="color:var(--acc);margin-left:4px">—</b>
+        <button class="mini" id="ain-use-bpm" style="margin-left:8px">usar este BPM</button></div>
+
+      <div class="sec" style="margin-top:10px"><div class="sec-title">TRANSCRIPCIÓN A NOTAS</div><div class="sec-body">
+        <div class="ctl-row"><label>Tipo de sonido</label>
+          <select id="ain-source"><option value="auto" selected>general (voz/lead)</option><option value="bass">bajo / grave</option><option value="treble">agudo / flauta</option><option value="full">rango completo</option></select></div>
+        <div class="ctl-row"><label>Sensibilidad</label><input type="range" id="ain-sens" min="0.01" max="0.10" step="0.005" value="0.05" style="flex:1"><span id="ain-sens-v" class="val" style="width:44px"></span></div>
+        <div class="ctl-row"><label>Nota mín.</label><input type="range" id="ain-mindur" min="0.03" max="0.4" step="0.01" value="0.08" style="flex:1"><span id="ain-mindur-v" class="val" style="width:44px"></span></div>
+        <div class="ctl-row"><label>Rango</label>
+          <select id="ain-octshift"><option value="0">tal cual</option><option value="12">+1 octava</option><option value="-12">−1 octava</option><option value="24">+2 oct.</option><option value="-24">−2 oct.</option></select>
+          <label style="min-width:70px;margin-left:10px">Cuantizar</label>
+          <select id="ain-quant"><option value="0">no</option><option value="0.25">1/16</option><option value="0.5" selected>1/8</option><option value="1">1/4</option></select></div>
+        <div class="ctl-row"><button id="ain-analyze" class="acc">Analizar melodía</button>
+          <span id="ain-notes-count" style="margin-left:10px;color:var(--acc);font-size:12px"></span></div>
+        <div style="border:1px solid var(--line);background:var(--bg);margin-top:6px;display:none" id="ain-piano-wrap">
+          <canvas id="ain-piano" height="120" style="display:block;width:100%"></canvas></div>
+      </div></div>
+    </div>
+  </div>
+  <div class="m-actions" id="ain-actions" style="display:none">
+    <button class="acc" id="ain-add-notes">Añadir notas como pista nueva</button>
+    <button id="ain-add-ref">Añadir como pista de referencia</button>
+    <button id="ain-replace">Reemplazar proyecto con estas notas</button>
+  </div>
+</div></div>
+
 <!-- ══════════ MODAL PRESETS ══════════ -->
-<div class="modal-bg" id="modal-presets"><div class="modal" style="width:min(560px,94vw)">
+<div class="modal-bg" id="modal-presets"><div class="modal" style="width:min(640px,94vw)">
   <div class="m-title">BIBLIOTECA DE INSTRUMENTOS <span class="close" data-close="modal-presets">✕</span></div>
+  <div style="padding:8px 12px; border-bottom:1px solid var(--line); display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <input type="text" id="inst-search" placeholder="Buscar instrumento…" style="flex:1; min-width:140px">
+    <select id="inst-fam-filter" style="min-width:120px"><option value="">Todas las familias</option></select>
+  </div>
   <div class="m-body" id="preset-list" style="padding:0"></div>
   <div class="m-actions">
     <button class="acc" id="btn-save-preset">Guardar instrumento actual como preset</button>
-    <span class="note" style="margin:0;align-self:center">Los presets propios viajan dentro del JSON del proyecto.</span>
+    <span class="note" style="margin:0;align-self:center">Tus presets propios viajan dentro del proyecto.</span>
   </div>
 </div></div>
 
@@ -379,6 +429,11 @@ subir a plataformas o enviar una maqueta. El código sigue siendo lo recomendado
 dinámico), pero el audio es cómodo para compartir.<br><br>
 <b>Proyectos guardados.</b> El botón <b>Proyectos</b> guarda en este navegador (sin subir nada). Además, el trabajo
 se auto-guarda: al reabrir la página se restaura tu última sesión. Para copia de seguridad real, exporta a JSON.<br><br>
+<b>Biblioteca de instrumentos.</b> En el panel <b>Instrumento</b> (⚙) elige por nombre — Piano, Flauta, Violín,
+Trompeta, Guitarra, Bajo, Campanas, Pads, Leads, percusión… Son más de 50 presets de síntesis afinados a mano
+para sonar con el carácter de cada instrumento en el idioma SNES/GBA, sin usar ni un solo archivo de audio. El botón
+<b>Presets</b> abre la biblioteca completa con buscador y familias, y un botón "▸ probar" en cada uno. Tras elegir,
+puedes retocar cualquier control (ADSR, filtro, vibrato, unísono…) para hacerlo tuyo.<br><br>
 <b>Síntesis ampliada.</b> Cada instrumento admite oscilador principal con <b>unísono</b> (hasta 7 voces, tipo
 supersaw), un <b>segundo oscilador</b> afinable por intervalos, un <b>sub-oscilador</b>, capa de <b>ruido</b>,
 envolventes de amplitud y de <b>filtro</b> independientes, vibrato con retardo, arpegiador con modos y acordes
@@ -716,7 +771,8 @@ function applyAuto(c,ch,trk,abs,spb,totalBeats){
 }
 // ── estado del reproductor + planificador de pasadas (loop sin costura, reloj absoluto)
 const S={genId:0,timer:null,master:null,chains:null,song:null,provider:null,opts:null,
-         playing:false,passStart:0,passDur:0,layersOff:{},masterVol:0.8};
+         playing:false,passStart:0,passDur:0,layersOff:{},masterVol:0.8,
+         refBuffer:null,refEnabled:false,refGain:0.6,refOffset:0,_refNodes:[]};
 function gateTarget(song,trk){
   const anySolo=(song.tracks||[]).some(t=>t.solo);
   if(trk.mute)return 0;
@@ -727,6 +783,7 @@ function gateTarget(song,trk){
 function stop(fade){
   S.genId++; S.playing=false;
   if(S.timer){clearTimeout(S.timer); S.timer=null;}
+  if(S._refNodes){ S._refNodes.forEach(n=>{try{n.stop();}catch(e){} try{n.disconnect();}catch(e){}}); S._refNodes=[]; }
   if(S.master&&_ctx){
     try{
       const g=S.master, now=_ctx.currentTime, f=(fade!=null?fade:0.3);
@@ -750,7 +807,7 @@ function play(songOrFn,opts){
   if(c.state==='suspended'){try{c.resume();}catch(e){}}
   stop(0.2);
   const my=++S.genId;
-  S.playing=true; S.opts=opts;
+  S.playing=true; S.opts=opts; S._refNodes=[];
   S.provider=(typeof songOrFn==='function')?songOrFn:null;
   let song=S.provider?S.provider():songOrFn; S.song=song;
   const master=c.createGain(); master.gain.value=0.0001;
@@ -796,6 +853,17 @@ function play(songOrFn,opts){
     if(opts.metronome&&opts.metronome()){
       for(let b=0;b<totalBeats;b++)
         metroTick(c,opts.dest||c.destination,abs+b*spb,(b%S.beatsPerBar)===0);
+    }
+    // pista de referencia: buffer de audio importado, alineado al inicio de la pasada
+    if(S.refBuffer && S.refEnabled){
+      try{
+        const rs=c.createBufferSource(); rs.buffer=S.refBuffer;
+        const rg=c.createGain(); rg.gain.value=(S.refGain!=null?S.refGain:0.6);
+        rs.connect(rg); rg.connect(opts.dest||c.destination);
+        const off=Math.max(0,S.refOffset||0);
+        const playDur=Math.min(S.refBuffer.duration-off, dur+0.05);
+        if(playDur>0){ rs.start(abs, off, playDur); S._refNodes.push(rs); }
+      }catch(e){}
     }
     if(opts.onPass)opts.onPass(abs,dur,sg);
     return dur;
@@ -905,7 +973,272 @@ function renderToBuffer(song,opts){
   });
   return oc.startRendering();
 }
+// ══════════════════════════════════════════════════════════════════
+//  ANÁLISIS DE AUDIO (ingeniería inversa): decodificar → tono → notas → BPM
+//  Detección de tono: YIN (de Cheveigné & Kawahara, 2002) + segmentación
+//  por ESTABILIDAD de frecuencia con detección de onsets (separa notas
+//  repetidas). Todo local, sin dependencias. Pensado para melodías de
+//  una sola voz (monofónicas).
+// ══════════════════════════════════════════════════════════════════
+function decodeAudio(arrayBuffer){
+  const c=ctx(); if(!c)return Promise.reject(new Error('AudioContext no disponible'));
+  return c.decodeAudioData(arrayBuffer.slice(0));
+}
+// mezcla a mono Float32
+function toMono(buf){
+  const n=buf.length, out=new Float32Array(n), ch=buf.numberOfChannels;
+  for(let c=0;c<ch;c++){ const d=buf.getChannelData(c); for(let i=0;i<n;i++)out[i]+=d[i]/ch; }
+  return out;
+}
+// remuestreo lineal (22050 sobra para el rango musical; acelera ~2x)
+function resampleMono(mono,srIn,srOut){
+  if(srOut>=srIn)return {data:mono,sr:srIn};
+  const ratio=srIn/srOut, n=Math.floor(mono.length/ratio), out=new Float32Array(n);
+  for(let i=0;i<n;i++){ const x=i*ratio, i0=x|0, f=x-i0; out[i]=mono[i0]*(1-f)+(mono[i0+1]||0)*f; }
+  return {data:out,sr:srOut};
+}
+const NAMES2=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+function midiToName(m){ const oct=Math.floor(m/12)-1; return NAMES2[((m%12)+12)%12]+oct; }
+function freqToMidiFloat(f){ return 69+12*Math.log2(f/440); }
+function freqToNote(f){ if(!f||f<=0)return null; const m=Math.round(freqToMidiFloat(f)); return {name:midiToName(m), cents:(freqToMidiFloat(f)-m)*100}; }
+
+// ── Núcleo YIN sobre un bloque. Devuelve {freq, prob} (prob=confianza 0..1) ──
+function yinBlock(buf,SR,opts){
+  opts=opts||{};
+  const threshold=opts.threshold!=null?opts.threshold:0.15;
+  const fmin=opts.fmin||65, fmax=opts.fmax||1500;
+  const N=buf.length;
+  const tauMax=Math.min(N>>1, Math.floor(SR/fmin));
+  const tauMin=Math.max(2, Math.floor(SR/fmax));
+  if(tauMax<=tauMin)return {freq:0,prob:0};
+  const d=new Float32Array(tauMax+1);
+  for(let tau=tauMin;tau<=tauMax;tau++){
+    let sum=0; for(let i=0;i<N-tauMax;i++){ const dl=buf[i]-buf[i+tau]; sum+=dl*dl; }
+    d[tau]=sum;
+  }
+  const dp=new Float32Array(tauMax+1); dp[0]=1; let running=0;
+  for(let tau=tauMin;tau<=tauMax;tau++){ running+=d[tau]; dp[tau]=running>0?d[tau]*tau/running:1; }
+  let tauEst=-1;
+  for(let tau=tauMin;tau<=tauMax;tau++){
+    if(dp[tau]<threshold){ while(tau+1<=tauMax&&dp[tau+1]<dp[tau])tau++; tauEst=tau; break; }
+  }
+  if(tauEst===-1){
+    let min=Infinity,minTau=-1;
+    for(let tau=tauMin;tau<=tauMax;tau++)if(dp[tau]<min){min=dp[tau];minTau=tau;}
+    if(minTau===-1||min>0.6)return {freq:0,prob:0};
+    tauEst=minTau;
+  }
+  let betterTau=tauEst;
+  if(tauEst>tauMin&&tauEst<tauMax){
+    const s0=dp[tauEst-1],s1=dp[tauEst],s2=dp[tauEst+1];
+    const denom=(2*(2*s1-s2-s0));
+    if(denom!==0)betterTau=tauEst+(s2-s0)/denom;
+  }
+  const freq=SR/betterTau, prob=1-dp[tauEst];
+  if(freq<fmin||freq>fmax)return {freq:0,prob:0};
+  return {freq,prob};
+}
+
+// ── Segmentación por estabilidad a partir de frames {t,midi,prob,rms} ──
+function _segment(frames,envS,onset,nF,hopSec,params){
+  const notes=[];
+  const tol=params.tol!=null?params.tol:0.65;
+  const gapFrames=Math.round((params.gap||0.05)/hopSec);
+  const minDur=params.minDur||0.09;
+  let active=null;
+  function energyRising(i){
+    const before=(envS[Math.max(0,i-3)]+envS[Math.max(0,i-2)])/2;
+    const after=(envS[Math.min(nF-1,i+1)]+envS[Math.min(nF-1,i+2)])/2;
+    return after>before*1.12;
+  }
+  function closeNote(endI){
+    if(!active)return;
+    const dur=(endI-active.startI)*hopSec;
+    if(dur>=minDur){
+      const avg=active.sumMidi/active.cnt, midi=Math.round(avg);
+      notes.push({midi,name:midiToName(midi),tStart:active.startI*hopSec,tEnd:endI*hopSec,
+        cents:(avg-midi)*100,frames:active.cnt,startedByOnset:!!active.byOnset,conf:active.sumProb/active.cnt,rising:active.rising});
+    }
+    active=null;
+  }
+  for(let i=0;i<nF;i++){
+    const m=frames[i]._m, pr=frames[i].prob||0;
+    let onsetHere=false;
+    if(onset[i]&&active&&(i-active.startI)*hopSec>=minDur*0.6){ closeNote(i); onsetHere=true; }
+    if(m==null){ if(active&&(i-active.lastGoodI)>gapFrames)closeNote(active.lastGoodI+1); continue; }
+    if(!active){ active={startI:i,sumMidi:m,cnt:1,lastGoodI:i,byOnset:onsetHere,sumProb:pr,rising:onsetHere||energyRising(i)}; }
+    else{
+      const avg=active.sumMidi/active.cnt;
+      if(Math.abs(m-avg)<=tol){ active.sumMidi+=m; active.cnt++; active.lastGoodI=i; active.sumProb+=pr; }
+      else{ closeNote(active.lastGoodI+1); active={startI:i,sumMidi:m,cnt:1,lastGoodI:i,byOnset:false,sumProb:pr,rising:energyRising(i)}; }
+    }
+  }
+  if(active)closeNote(active.lastGoodI+1);
+  // reetiquetar: nota "de onset" si hay un onset dentro de ±5 frames de su inicio
+  const onsetFrames=[]; for(let i=0;i<nF;i++)if(onset[i])onsetFrames.push(i);
+  for(const n of notes){ const si=Math.round(n.tStart/hopSec);
+    for(const oi of onsetFrames)if(Math.abs(oi-si)<=5){ n.startedByOnset=true; break; } }
+  return _mergeTransitions(notes,params);
+}
+function _mergeTransitions(notesIn,params){
+  if(notesIn.length<=1)return notesIn.slice();
+  const minKeep=params.minKeep!=null?params.minKeep:0.055;
+  const phantomDur=params.phantomDur||0.14;
+  // absorber colas de release: notas cortas sin onset pegadas a una previa más larga
+  const notes=[];
+  for(let i=0;i<notesIn.length;i++){
+    const n=notesIn[i], dur=n.tEnd-n.tStart, prev=notes[notes.length-1];
+    if(prev&&!n.startedByOnset&&dur<phantomDur){
+      const gap=n.tStart-prev.tEnd;
+      if(gap<0.06&&(prev.tEnd-prev.tStart)>=dur*1.5&&!n.rising){ prev.tEnd=Math.max(prev.tEnd,n.tEnd); continue; }
+    }
+    notes.push(Object.assign({},n));
+  }
+  const out=[];
+  for(let i=0;i<notes.length;i++){
+    const n=notes[i], dur=n.tEnd-n.tStart;
+    if(dur<minKeep&&!n.startedByOnset){
+      const prev=out[out.length-1], next=notes[i+1];
+      const prevDur=prev?prev.tEnd-prev.tStart:0, nextDur=next?next.tEnd-next.tStart:0;
+      if((prev&&prevDur>dur*1.5)||(next&&nextDur>dur*1.5)){
+        if(prev&&next&&Math.abs(prev.midi-n.midi)<=Math.abs(next.midi-n.midi))prev.tEnd=n.tEnd;
+        else if(next)next.tStart=n.tStart; else if(prev)prev.tEnd=n.tEnd;
+        continue;
+      }
+    }
+    out.push(Object.assign({},n));
+  }
+  const merged=[];
+  for(const n of out){
+    const last=merged[merged.length-1];
+    if(last&&last.midi===n.midi&&!n.startedByOnset&&(n.tStart-last.tEnd)<(params.joinGap||0.03))last.tEnd=n.tEnd;
+    else merged.push(n);
+  }
+  return merged;
+}
+// detección de onsets: flujo positivo fuerte + valles de energía (notas repetidas de sostenido plano)
+function _onsets(frames,nF,hopSec,silence){
+  const onset=new Uint8Array(nF);
+  const env=frames.map(f=>f.rms), envS=new Float32Array(nF);
+  for(let i=0;i<nF;i++){ let a=0,c=0; for(let k=-1;k<=1;k++)if(env[i+k]!=null){a+=env[i+k];c++;} envS[i]=a/(c||1); }
+  let emax=0; for(let i=0;i<nF;i++)if(envS[i]>emax)emax=envS[i];
+  const floor=emax*0.12, wnd=6;
+  for(let i=2;i<nF-1;i++){
+    const rise=envS[i]-envS[i-1]; if(rise<=0)continue;
+    let sum=0,cnt=0; for(let k=i-wnd;k<=i+wnd;k++)if(k>=0&&k<nF){sum+=Math.max(0,envS[k]-(envS[k-1]||envS[k]));cnt++;}
+    const meanRise=sum/(cnt||1);
+    if(rise>meanRise*1.8&&rise>emax*0.03&&envS[i]>floor){ if(i<2||(!onset[i-1]&&!onset[i-2]))onset[i]=1; }
+  }
+  for(let i=3;i<nF-3;i++){
+    if(envS[i]<floor)continue;
+    let isMin=true; for(let k=i-2;k<=i+2;k++)if(k!==i&&envS[k]<envS[i]){isMin=false;break;}
+    if(!isMin)continue;
+    const left=Math.max(envS[i-3],envS[i-2]), right=Math.max(envS[i+2],envS[i+3]);
+    if(left>envS[i]*1.18&&right>envS[i]*1.18){ const oi=i+1; if(!onset[oi]&&!onset[oi-1]&&!onset[oi+1])onset[oi]=1; }
+  }
+  return {onset,envS};
+}
+// construye la serie de frames (YIN por ventana)
+function _frames(mono,SR,params){
+  const win=Math.floor(SR*(params.win||0.040)), hop=Math.floor(SR*(params.hop||0.010));
+  const threshold=params.threshold!=null?params.threshold:0.15;
+  const fmin=params.fmin||70, fmax=params.fmax||1300;
+  const probMin=params.probMin!=null?params.probMin:0.30;
+  const silence=params.silence!=null?params.silence:0.010;
+  const frames=[];
+  for(let s=0;s+win<=mono.length;s+=hop){
+    const seg=mono.subarray(s,s+win);
+    let rms=0; for(let i=0;i<seg.length;i++)rms+=seg[i]*seg[i]; rms=Math.sqrt(rms/seg.length);
+    let midi=null,prob=0,freq=0;
+    if(rms>=silence){ const y=yinBlock(seg,SR,{threshold,fmin,fmax}); if(y.freq>0&&y.prob>=probMin){freq=y.freq;midi=freqToMidiFloat(y.freq);prob=y.prob;} }
+    frames.push({t:s/SR,midi,prob,rms,freq});
+  }
+  return {frames,hop,win};
+}
+// mediana móvil sobre midi (absorbe vibrato y saltos de octava) → escribe _m en cada frame
+function _median(frames,medWin){
+  const nF=frames.length;
+  for(let i=0;i<nF;i++){
+    const w=[]; for(let k=-medWin;k<=medWin;k++){ const f=frames[i+k]; if(f&&f.midi!=null)w.push(f.midi); }
+    if(w.length>=2){ w.sort((a,b)=>a-b); frames[i]._m=w[w.length>>1]; }
+    else if(w.length===1)frames[i]._m=w[0]; else frames[i]._m=null;
+  }
+}
+// versión SÍNCRONA (audios cortos y pruebas)
+function analyzeMelody(buf,params){
+  params=params||{};
+  const mono0=toMono(buf);
+  const {data:mono,sr:SR}=resampleMono(mono0,buf.sampleRate,params.srTarget||22050);
+  const {frames,hop}=_frames(mono,SR,params);
+  const hopSec=hop/SR, nF=frames.length;
+  _median(frames,params.medWin!=null?params.medWin:3);
+  const {onset,envS}=_onsets(frames,nF,hopSec,params.silence!=null?params.silence:0.010);
+  const notes=_segment(frames,envS,onset,nF,hopSec,params);
+  return {notes,frames,onsets:onset,duration:buf.duration,sr:SR};
+}
+// versión ASÍNCRONA por bloques: no congela la UI, informa progreso 0..1
+function analyzeMelodyAsync(buf,params,onProgress){
+  params=params||{};
+  return new Promise((resolve)=>{
+    const mono0=toMono(buf);
+    const {data:mono,sr:SR}=resampleMono(mono0,buf.sampleRate,params.srTarget||22050);
+    const win=Math.floor(SR*(params.win||0.040)), hop=Math.floor(SR*(params.hop||0.010));
+    const hopSec=hop/SR;
+    const threshold=params.threshold!=null?params.threshold:0.15;
+    const fmin=params.fmin||70, fmax=params.fmax||1300;
+    const probMin=params.probMin!=null?params.probMin:0.30;
+    const silence=params.silence!=null?params.silence:0.010;
+    const total=Math.max(1,Math.floor((mono.length-win)/hop));
+    const frames=new Array(total);
+    let idx=0; const CHUNK=200;
+    function step(){
+      const end=Math.min(idx+CHUNK,total);
+      for(;idx<end;idx++){
+        const s=idx*hop, seg=mono.subarray(s,s+win);
+        let rms=0; for(let i=0;i<seg.length;i++)rms+=seg[i]*seg[i]; rms=Math.sqrt(rms/seg.length);
+        let midi=null,prob=0,freq=0;
+        if(rms>=silence){ const y=yinBlock(seg,SR,{threshold,fmin,fmax}); if(y.freq>0&&y.prob>=probMin){freq=y.freq;midi=freqToMidiFloat(y.freq);prob=y.prob;} }
+        frames[idx]={t:s/SR,midi,prob,rms,freq};
+      }
+      if(onProgress)onProgress(idx/total*0.92);
+      if(idx<total){ setTimeout(step,0); }
+      else{
+        _median(frames,params.medWin!=null?params.medWin:3);
+        const {onset,envS}=_onsets(frames,total,hopSec,silence);
+        const notes=_segment(frames,envS,onset,total,hopSec,params);
+        if(onProgress)onProgress(1);
+        resolve({notes,frames,onsets:onset,duration:buf.duration,sr:SR});
+      }
+    }
+    setTimeout(step,0);
+  });
+}
+// detección de BPM por autocorrelación del flujo de energía
+function detectBPM(buf,range){
+  const mono0=toMono(buf);
+  const {data:mono,sr:SR}=resampleMono(mono0,buf.sampleRate,22050);
+  const hop=Math.floor(SR*0.011), win=Math.floor(SR*0.023);
+  const env=[]; for(let s=0;s+win<mono.length;s+=hop){ let e=0; for(let i=0;i<win;i++)e+=mono[s+i]*mono[s+i]; env.push(Math.sqrt(e/win)); }
+  const flux=[]; for(let i=1;i<env.length;i++){ const d=env[i]-env[i-1]; flux.push(d>0?d:0); }
+  const mean=flux.reduce((a,b)=>a+b,0)/(flux.length||1);
+  for(let i=0;i<flux.length;i++)flux[i]-=mean;
+  const fps=SR/hop, lo=range&&range[0]||70, hi=range&&range[1]||190;
+  const tauMin=Math.floor(fps*60/hi), tauMax=Math.ceil(fps*60/lo);
+  let bestTau=-1,best=0;
+  for(let tau=tauMin;tau<=tauMax;tau++){ let ac=0; for(let i=0;i+tau<flux.length;i++)ac+=flux[i]*flux[i+tau]; if(ac>best){best=ac;bestTau=tau;} }
+  if(bestTau<=0)return null;
+  let bpm=60*fps/bestTau; while(bpm<lo)bpm*=2; while(bpm>hi)bpm/=2;
+  return Math.round(bpm);
+}
+// control de la pista de referencia desde la app
+function setReference(buffer,gain){ S.refBuffer=buffer||null; if(gain!=null)S.refGain=gain; S.refEnabled=!!buffer; }
+function enableReference(on){ S.refEnabled=!!on; }
+function setReferenceGain(g){ S.refGain=g; }
+function setReferenceOffset(sec){ S.refOffset=sec||0; }
+
 return {play,stop,setLayers,refreshGates,refreshLive,setMasterVolume,previewNote,renderToBuffer,
+        decodeAudio,analyzeMelody,analyzeMelodyAsync,detectBPM,toMono,freqToNote,
+        setReference,enableReference,setReferenceGain,setReferenceOffset,
         freqOf,NOTE_FREQ,buildChain,setChain,playNote,fillInst,ctx,state:S};
 })();
 </script>
@@ -1242,30 +1575,342 @@ const BLACK=/b\d$/;
 
 /* ── presets de fábrica ── */
 function P(o){return o;}
-const FACTORY_PRESETS=[
- {name:'Lead Cuadrado', cat:'melodía', inst:P({wave:'square', vol:0.9, adsr:{a:0.005,d:0.06,s:0.6,r:0.08}, vib:{rate:5.5,depth:8}})},
- {name:'Lead Sierra', cat:'melodía', inst:P({wave:'sawtooth', vol:0.8, adsr:{a:0.01,d:0.08,s:0.55,r:0.1}, filter:{type:'lowpass',freq:3200,q:2,lfoRate:0,lfoDepth:0}, vib:{rate:5,depth:10}})},
- {name:'Flauta Triangular', cat:'melodía', inst:P({wave:'triangle', vol:1, adsr:{a:0.04,d:0.1,s:0.75,r:0.18}, vib:{rate:4.5,depth:6}})},
- {name:'Voz Glide', cat:'melodía', inst:P({wave:'triangle', vol:0.95, glide:0.09, adsr:{a:0.03,d:0.1,s:0.8,r:0.2}, vib:{rate:5,depth:12}})},
- {name:'Bajo Pulso', cat:'bajo', inst:P({wave:'square', vol:0.85, adsr:{a:0.005,d:0.09,s:0.5,r:0.06}, filter:{type:'lowpass',freq:900,q:1.2,lfoRate:0,lfoDepth:0}})},
- {name:'Bajo Sub', cat:'bajo', inst:P({wave:'sine', vol:1, adsr:{a:0.008,d:0.05,s:0.9,r:0.1}})},
- {name:'Bajo Ácido', cat:'bajo', inst:P({wave:'sawtooth', vol:0.75, glide:0.05, adsr:{a:0.004,d:0.12,s:0.35,r:0.05}, filter:{type:'lowpass',freq:700,q:8,lfoRate:0.25,lfoDepth:450}, fx:{dist:0.25}})},
- {name:'Pad Cálido', cat:'pad', inst:P({wave:'triangle', vol:0.7, adsr:{a:0.6,d:0.3,s:0.85,r:1.2}, fx:{chorus:{on:true,rate:0.5,depth:0.006,mix:0.45}, reverb:{on:true,size:2.6,mix:0.4}}})},
- {name:'Cuerdas Frías', cat:'pad', inst:P({wave:'sawtooth', vol:0.5, adsr:{a:0.8,d:0.4,s:0.8,r:1.5}, filter:{type:'lowpass',freq:1600,q:0.8,lfoRate:0.15,lfoDepth:500}, fx:{chorus:{on:true,rate:0.4,depth:0.007,mix:0.5}, reverb:{on:true,size:3,mix:0.45}}})},
- {name:'Dron Ambiente', cat:'pad', inst:P({wave:'sine', vol:0.9, adsr:{a:1.5,d:0.5,s:1,r:2}, trem:{rate:0.9,depth:0.5}, fx:{reverb:{on:true,size:3.5,mix:0.5}}})},
- {name:'Campana', cat:'color', inst:P({wave:'sine', vol:0.9, adsr:{a:0.002,d:0.6,s:0.12,r:0.8}, pitchEnv:{amt:12, time:0.015}, fx:{delay:{on:true,time:0.32,fb:0.35,mix:0.3}, reverb:{on:true,size:2.2,mix:0.3}}})},
- {name:'Arpegio Cristal', cat:'color', inst:P({wave:'square', vol:0.6, adsr:{a:0.004,d:0.09,s:0.4,r:0.12}, arp:{on:true,rate:12,pattern:[0,4,7,12]}, fx:{delay:{on:true,time:0.22,fb:0.3,mix:0.3}}})},
- {name:'Órgano Rúnico', cat:'color', inst:P({wave:'square', vol:0.55, adsr:{a:0.05,d:0.1,s:0.9,r:0.15}, trem:{rate:6,depth:0.25}, fx:{chorus:{on:true,rate:0.8,depth:0.004,mix:0.4}}})},
- {name:'Bombo', cat:'percusión', inst:P({wave:'sine', vol:1, adsr:{a:0.002,d:0.09,s:0.001,r:0.08}, pitchEnv:{amt:26,time:0.06}})},
- {name:'Caja', cat:'percusión', inst:P({wave:'noise', vol:0.9, adsr:{a:0.002,d:0.1,s:0.001,r:0.09}, filter:{type:'highpass',freq:900,q:0.7,lfoRate:0,lfoDepth:0}})},
- {name:'Hi-Hat', cat:'percusión', inst:P({wave:'noise', vol:0.55, adsr:{a:0.001,d:0.03,s:0.001,r:0.03}, filter:{type:'highpass',freq:6000,q:0.7,lfoRate:0,lfoDepth:0}})},
- {name:'Tom Grave', cat:'percusión', inst:P({wave:'noise', vol:1, adsr:{a:0.002,d:0.12,s:0.001,r:0.1}, filter:{type:'lowpass',freq:500,q:1.5,lfoRate:0,lfoDepth:0}})},
- {name:'Supersaw', cat:'melodía', inst:P({wave:'sawtooth', vol:0.7, unison:{voices:7,detune:22,spread:0.8}, adsr:{a:0.02,d:0.1,s:0.7,r:0.25}, filter:{type:'lowpass',freq:5000,q:1,lfoRate:0,lfoDepth:0}, fx:{reverb:{on:true,size:2.2,mix:0.25}}})},
- {name:'Bajo Reese', cat:'bajo', inst:P({wave:'sawtooth', vol:0.75, osc2:{on:true,wave:'sawtooth',semis:0,detune:18,mix:0.8}, sub:{on:true,wave:'sine',octave:-1,mix:0.6}, adsr:{a:0.01,d:0.1,s:0.85,r:0.12}, filter:{type:'lowpass',freq:800,q:3,lfoRate:0.2,lfoDepth:300}})},
- {name:'Pluck Filtrado', cat:'melodía', inst:P({wave:'sawtooth', vol:0.7, adsr:{a:0.002,d:0.2,s:0,r:0.15}, filter:{type:'lowpass',freq:1200,q:4,lfoRate:0,lfoDepth:0}, fenv:{amt:0.7,a:0.002,d:0.18,s:0,octaves:3}, fx:{delay:{on:true,time:0.28,fb:0.35,mix:0.28,ping:true}}})},
- {name:'Chip Arcade', cat:'color', inst:P({wave:'square', vol:0.55, adsr:{a:0.002,d:0.06,s:0.5,r:0.06}, arp:{on:true,rate:16,pattern:[0,7,12,7],mode:'up'}, fx:{crush:{on:true,bits:6}}})},
- {name:'Pad Vidrio', cat:'pad', inst:P({wave:'triangle', vol:0.6, osc2:{on:true,wave:'sine',semis:12,detune:5,mix:0.4}, adsr:{a:1,d:0.5,s:0.85,r:1.8}, vib:{rate:3,depth:6,delay:0.6}, fx:{chorus:{on:true,rate:0.4,depth:0.007,mix:0.5}, reverb:{on:true,size:3.5,mix:0.5}}})},
+/* ═══════════════════════════════════════════════════════════════════════════
+   BIBLIOTECA DE INSTRUMENTOS — presets de síntesis afinados a mano.
+   Cada uno emula el carácter de un instrumento real en el idioma SNES/GBA:
+   nada de muestras, solo osciladores + envolventes + filtros bien ajustados.
+   Claves de diseño por familia:
+   · Ataque/decay definen la articulación (pizzicato vs. arco, martillo vs. soplo)
+   · La envolvente de filtro (fenv) da el "brillo que decae" típico de cuerda pulsada
+   · El vibrato con retardo (vib.delay) imita al intérprete que entra en la nota
+   · osc2 a intervalos (octava/quinta) engorda como los chips de Nintendo
+   · unison sutil da coro de sección (cuerdas, brass)
+   ═══════════════════════════════════════════════════════════════════════════ */
+const INSTRUMENT_LIBRARY=[
+ // ───────────── TECLAS ─────────────
+ {name:'Piano', fam:'Teclas', desc:'Martillo con brillo que decae', inst:{
+   wave:'triangle', vol:0.95,
+   osc2:{on:true, wave:'square', semis:0, detune:4, mix:0.22},
+   adsr:{a:0.002, d:0.9, s:0.0, r:0.18},
+   filter:{type:'lowpass', freq:3200, q:0.8, lfoRate:0, lfoDepth:0},
+   fenv:{amt:0.55, a:0.002, d:0.7, s:0.0, octaves:2.5},
+   vol_key:0.25 }},
+ {name:'Piano Eléctrico', fam:'Teclas', desc:'Rhodes cristalino con campana', inst:{
+   wave:'sine', vol:0.9,
+   osc2:{on:true, wave:'sine', semis:12, detune:3, mix:0.3},
+   adsr:{a:0.004, d:1.1, s:0.12, r:0.3},
+   pitchEnv:{amt:0.15, time:0.02},
+   fenv:{amt:0.4, a:0.004, d:0.9, s:0.05, octaves:2},
+   filter:{type:'lowpass', freq:2600, q:0.7, lfoRate:0, lfoDepth:0},
+   fx:{chorus:{on:true, rate:0.5, depth:0.004, mix:0.3}} }},
+ {name:'Órgano', fam:'Teclas', desc:'Ruedas fónicas sostenidas', inst:{
+   wave:'square', vol:0.6,
+   osc2:{on:true, wave:'square', semis:12, detune:0, mix:0.5},
+   sub:{on:true, wave:'sine', octave:-1, mix:0.35},
+   adsr:{a:0.01, d:0.05, s:1.0, r:0.06},
+   vib:{rate:6.2, depth:5, delay:0},
+   filter:{type:'lowpass', freq:4000, q:0.6, lfoRate:0, lfoDepth:0} }},
+ {name:'Órgano de Iglesia', fam:'Teclas', desc:'Tubos con quinta y trémolo lento', inst:{
+   wave:'triangle', vol:0.55,
+   osc2:{on:true, wave:'sine', semis:19, detune:0, mix:0.35},
+   sub:{on:true, wave:'sine', octave:-1, mix:0.4},
+   adsr:{a:0.08, d:0.1, s:1.0, r:0.4},
+   trem:{rate:4.5, depth:0.18},
+   fx:{reverb:{on:true, size:3.2, mix:0.4}} }},
+ {name:'Clavicémbalo', fam:'Teclas', desc:'Cuerda pulsada brillante y seca', inst:{
+   wave:'sawtooth', vol:0.7,
+   osc2:{on:true, wave:'square', semis:12, detune:2, mix:0.3},
+   adsr:{a:0.002, d:0.5, s:0.0, r:0.12},
+   fenv:{amt:0.5, a:0.002, d:0.4, s:0.0, octaves:2.5},
+   filter:{type:'lowpass', freq:4200, q:1.2, lfoRate:0, lfoDepth:0} }},
+
+ // ───────────── CUERDAS FROTADAS ─────────────
+ {name:'Violín', fam:'Cuerdas', desc:'Arco cálido con vibrato tardío', inst:{
+   wave:'sawtooth', vol:0.5,
+   adsr:{a:0.08, d:0.15, s:0.85, r:0.25},
+   vib:{rate:5.8, depth:14, delay:0.35},
+   filter:{type:'lowpass', freq:2800, q:1, lfoRate:0, lfoDepth:0},
+   fenv:{amt:0.25, a:0.09, d:0.3, s:0.6, octaves:1.5},
+   fx:{reverb:{on:true, size:2, mix:0.2}} }},
+ {name:'Chelo', fam:'Cuerdas', desc:'Arco grave y expresivo', inst:{
+   wave:'sawtooth', vol:0.55,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.25},
+   adsr:{a:0.1, d:0.2, s:0.8, r:0.35},
+   vib:{rate:5, depth:12, delay:0.4},
+   filter:{type:'lowpass', freq:1800, q:1, lfoRate:0, lfoDepth:0},
+   fx:{reverb:{on:true, size:2.4, mix:0.22}} }},
+ {name:'Sección de Cuerdas', fam:'Cuerdas', desc:'Ensemble amplio con coro', inst:{
+   wave:'sawtooth', vol:0.42,
+   unison:{voices:5, detune:16, spread:0.7},
+   adsr:{a:0.25, d:0.3, s:0.85, r:0.9},
+   vib:{rate:4.8, depth:8, delay:0.5},
+   filter:{type:'lowpass', freq:2400, q:0.8, lfoRate:0.15, lfoDepth:300},
+   fx:{chorus:{on:true, rate:0.4, depth:0.006, mix:0.4}, reverb:{on:true, size:3, mix:0.35}} }},
+ {name:'Pizzicato', fam:'Cuerdas', desc:'Cuerda pellizcada, corta', inst:{
+   wave:'triangle', vol:0.7,
+   osc2:{on:true, wave:'sawtooth', semis:0, detune:6, mix:0.3},
+   adsr:{a:0.002, d:0.18, s:0.0, r:0.1},
+   fenv:{amt:0.5, a:0.002, d:0.15, s:0.0, octaves:2.5},
+   filter:{type:'lowpass', freq:3000, q:1.2, lfoRate:0, lfoDepth:0} }},
+ {name:'Arpa', fam:'Cuerdas', desc:'Pulsación dulce con cola', inst:{
+   wave:'triangle', vol:0.7,
+   osc2:{on:true, wave:'sine', semis:12, detune:2, mix:0.25},
+   adsr:{a:0.003, d:1.0, s:0.0, r:0.5},
+   fenv:{amt:0.35, a:0.003, d:0.9, s:0.0, octaves:2},
+   fx:{reverb:{on:true, size:2.6, mix:0.3}} }},
+
+ // ───────────── VIENTOS MADERA ─────────────
+ {name:'Flauta', fam:'Viento', desc:'Soplo puro con aire', inst:{
+   wave:'sine', vol:0.85,
+   noiseMix:0.04,
+   adsr:{a:0.06, d:0.1, s:0.9, r:0.15},
+   vib:{rate:5.5, depth:8, delay:0.3},
+   filter:{type:'lowpass', freq:3500, q:0.6, lfoRate:0, lfoDepth:0} }},
+ {name:'Clarinete', fam:'Viento', desc:'Caña con timbre hueco', inst:{
+   wave:'square', vol:0.6,
+   adsr:{a:0.05, d:0.1, s:0.88, r:0.16},
+   vib:{rate:5, depth:6, delay:0.35},
+   filter:{type:'lowpass', freq:2200, q:1, lfoRate:0, lfoDepth:0} }},
+ {name:'Oboe', fam:'Viento', desc:'Doble caña nasal y penetrante', inst:{
+   wave:'sawtooth', vol:0.5,
+   adsr:{a:0.04, d:0.12, s:0.85, r:0.14},
+   vib:{rate:5.6, depth:10, delay:0.3},
+   filter:{type:'bandpass', freq:1400, q:2.2, lfoRate:0, lfoDepth:0} }},
+ {name:'Fagot', fam:'Viento', desc:'Madera grave y redonda', inst:{
+   wave:'sawtooth', vol:0.55,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.2},
+   adsr:{a:0.05, d:0.12, s:0.82, r:0.18},
+   vib:{rate:4.8, depth:7, delay:0.35},
+   filter:{type:'lowpass', freq:1500, q:1.4, lfoRate:0, lfoDepth:0} }},
+ {name:'Flauta Dulce', fam:'Viento', desc:'Recorder simple, tono claro', inst:{
+   wave:'triangle', vol:0.85,
+   noiseMix:0.03,
+   adsr:{a:0.03, d:0.08, s:0.9, r:0.12},
+   vib:{rate:5, depth:4, delay:0.4},
+   filter:{type:'lowpass', freq:4000, q:0.5, lfoRate:0, lfoDepth:0} }},
+
+ // ───────────── VIENTOS METAL ─────────────
+ {name:'Trompeta', fam:'Metal', desc:'Latón brillante con mordida', inst:{
+   wave:'sawtooth', vol:0.55,
+   adsr:{a:0.03, d:0.1, s:0.85, r:0.12},
+   vib:{rate:5.5, depth:8, delay:0.25},
+   filter:{type:'lowpass', freq:3200, q:1.2, lfoRate:0, lfoDepth:0},
+   fenv:{amt:0.4, a:0.03, d:0.2, s:0.7, octaves:1.5} }},
+ {name:'Trombón', fam:'Metal', desc:'Latón grave y potente', inst:{
+   wave:'sawtooth', vol:0.55,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.2},
+   adsr:{a:0.05, d:0.12, s:0.85, r:0.16},
+   vib:{rate:5, depth:6, delay:0.3},
+   filter:{type:'lowpass', freq:2000, q:1.1, lfoRate:0, lfoDepth:0} }},
+ {name:'Sección de Metales', fam:'Metal', desc:'Brass ensemble, golpe de fanfarria', inst:{
+   wave:'sawtooth', vol:0.45,
+   unison:{voices:3, detune:12, spread:0.5},
+   osc2:{on:true, wave:'square', semis:0, detune:8, mix:0.25},
+   adsr:{a:0.04, d:0.12, s:0.82, r:0.15},
+   filter:{type:'lowpass', freq:3000, q:1, lfoRate:0, lfoDepth:0},
+   fenv:{amt:0.45, a:0.04, d:0.25, s:0.6, octaves:1.8} }},
+ {name:'Trompa', fam:'Metal', desc:'Corno francés, redondo y noble', inst:{
+   wave:'triangle', vol:0.6,
+   osc2:{on:true, wave:'sawtooth', semis:0, detune:5, mix:0.4},
+   adsr:{a:0.07, d:0.15, s:0.82, r:0.25},
+   vib:{rate:4.8, depth:6, delay:0.4},
+   filter:{type:'lowpass', freq:2200, q:0.9, lfoRate:0, lfoDepth:0},
+   fx:{reverb:{on:true, size:2.2, mix:0.25}} }},
+ {name:'Saxofón', fam:'Metal', desc:'Caña metálica expresiva', inst:{
+   wave:'sawtooth', vol:0.5,
+   osc2:{on:true, wave:'square', semis:0, detune:6, mix:0.3},
+   adsr:{a:0.04, d:0.12, s:0.85, r:0.18},
+   vib:{rate:5.5, depth:12, delay:0.3},
+   filter:{type:'lowpass', freq:2400, q:1.5, lfoRate:0, lfoDepth:0} }},
+
+ // ───────────── GUITARRA Y PULSADAS ─────────────
+ {name:'Guitarra Limpia', fam:'Guitarra', desc:'Cuerda pulsada con cuerpo', inst:{
+   wave:'triangle', vol:0.75,
+   osc2:{on:true, wave:'sawtooth', semis:0, detune:5, mix:0.28},
+   adsr:{a:0.003, d:0.7, s:0.0, r:0.2},
+   fenv:{amt:0.5, a:0.003, d:0.6, s:0.0, octaves:2.5},
+   filter:{type:'lowpass', freq:2800, q:1, lfoRate:0, lfoDepth:0} }},
+ {name:'Guitarra Eléctrica', fam:'Guitarra', desc:'Con saturación y sostenido', inst:{
+   wave:'sawtooth', vol:0.55,
+   adsr:{a:0.004, d:0.4, s:0.4, r:0.2},
+   fenv:{amt:0.35, a:0.004, d:0.35, s:0.3, octaves:2},
+   filter:{type:'lowpass', freq:2600, q:1.5, lfoRate:0, lfoDepth:0},
+   fx:{dist:0.35, drive:'tanh'} }},
+ {name:'Guitarra Distorsión', fam:'Guitarra', desc:'Power chords de acción', inst:{
+   wave:'sawtooth', vol:0.5,
+   osc2:{on:true, wave:'square', semis:7, detune:4, mix:0.3},
+   adsr:{a:0.004, d:0.3, s:0.6, r:0.15},
+   filter:{type:'lowpass', freq:2400, q:1.2, lfoRate:0, lfoDepth:0},
+   fx:{dist:0.6, drive:'hard'} }},
+ {name:'Banjo', fam:'Guitarra', desc:'Pulsación seca y metálica', inst:{
+   wave:'square', vol:0.6,
+   osc2:{on:true, wave:'sawtooth', semis:12, detune:4, mix:0.3},
+   adsr:{a:0.002, d:0.3, s:0.0, r:0.1},
+   fenv:{amt:0.6, a:0.002, d:0.25, s:0.0, octaves:3},
+   filter:{type:'lowpass', freq:4000, q:1.4, lfoRate:0, lfoDepth:0} }},
+
+ // ───────────── BAJOS ─────────────
+ {name:'Bajo Eléctrico', fam:'Bajo', desc:'Dedos redondos con pizca', inst:{
+   wave:'triangle', vol:0.85,
+   osc2:{on:true, wave:'square', semis:0, detune:0, mix:0.2},
+   sub:{on:true, wave:'sine', octave:-1, mix:0.3},
+   adsr:{a:0.004, d:0.25, s:0.5, r:0.1},
+   fenv:{amt:0.4, a:0.004, d:0.2, s:0.2, octaves:2},
+   filter:{type:'lowpass', freq:900, q:1.5, lfoRate:0, lfoDepth:0} }},
+ {name:'Bajo Sintético', fam:'Bajo', desc:'Sub redondo para groove', inst:{
+   wave:'square', vol:0.8,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.4},
+   adsr:{a:0.004, d:0.12, s:0.7, r:0.08},
+   filter:{type:'lowpass', freq:700, q:1.2, lfoRate:0, lfoDepth:0} }},
+ {name:'Bajo Slap', fam:'Bajo', desc:'Ataque percusivo brillante', inst:{
+   wave:'sawtooth', vol:0.7,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.3},
+   adsr:{a:0.002, d:0.15, s:0.4, r:0.08},
+   fenv:{amt:0.7, a:0.002, d:0.12, s:0.1, octaves:3.5},
+   filter:{type:'lowpass', freq:1200, q:3, lfoRate:0, lfoDepth:0} }},
+ {name:'Contrabajo', fam:'Bajo', desc:'Pizzicato de jazz, cálido', inst:{
+   wave:'triangle', vol:0.85,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.35},
+   adsr:{a:0.005, d:0.35, s:0.0, r:0.15},
+   fenv:{amt:0.3, a:0.005, d:0.3, s:0.0, octaves:1.8},
+   filter:{type:'lowpass', freq:800, q:1, lfoRate:0, lfoDepth:0} }},
+
+ // ───────────── CAMPANAS Y MALLETS ─────────────
+ {name:'Campana', fam:'Campanas', desc:'Metálica con parcial de octava', inst:{
+   wave:'sine', vol:0.85,
+   osc2:{on:true, wave:'sine', semis:19, detune:2, mix:0.4},
+   adsr:{a:0.002, d:1.4, s:0.0, r:0.9},
+   pitchEnv:{amt:0.2, time:0.01},
+   fx:{reverb:{on:true, size:2.6, mix:0.35}} }},
+ {name:'Glockenspiel', fam:'Campanas', desc:'Placa brillante y corta', inst:{
+   wave:'sine', vol:0.8,
+   osc2:{on:true, wave:'sine', semis:24, detune:0, mix:0.3},
+   adsr:{a:0.001, d:0.7, s:0.0, r:0.4},
+   pitchEnv:{amt:0.3, time:0.008},
+   fx:{reverb:{on:true, size:2, mix:0.3}} }},
+ {name:'Vibráfono', fam:'Campanas', desc:'Barras con trémolo suave', inst:{
+   wave:'sine', vol:0.8,
+   osc2:{on:true, wave:'sine', semis:12, detune:1, mix:0.25},
+   adsr:{a:0.003, d:1.2, s:0.15, r:0.6},
+   trem:{rate:4, depth:0.35},
+   fx:{reverb:{on:true, size:2.2, mix:0.3}} }},
+ {name:'Marimba', fam:'Campanas', desc:'Madera cálida y percusiva', inst:{
+   wave:'sine', vol:0.85,
+   osc2:{on:true, wave:'triangle', semis:12, detune:2, mix:0.35},
+   adsr:{a:0.002, d:0.5, s:0.0, r:0.2},
+   pitchEnv:{amt:0.12, time:0.012},
+   filter:{type:'lowpass', freq:3000, q:0.8, lfoRate:0, lfoDepth:0} }},
+ {name:'Caja de Música', fam:'Campanas', desc:'Púa diminuta y tierna', inst:{
+   wave:'sine', vol:0.75,
+   osc2:{on:true, wave:'sine', semis:12, detune:3, mix:0.4},
+   adsr:{a:0.001, d:0.9, s:0.0, r:0.5},
+   pitchEnv:{amt:0.25, time:0.006},
+   fx:{reverb:{on:true, size:1.8, mix:0.28}} }},
+
+ // ───────────── SINTES: LEADS ─────────────
+ {name:'Lead Cuadrado', fam:'Lead', desc:'Chip clásico Nintendo', inst:{
+   wave:'square', vol:0.85,
+   adsr:{a:0.004, d:0.06, s:0.7, r:0.08},
+   vib:{rate:6, depth:10, delay:0.15} }},
+ {name:'Lead Pulso Fino', fam:'Lead', desc:'Onda estrecha nasal (GB)', inst:{
+   wave:'square', vol:0.7,
+   osc2:{on:true, wave:'square', semis:0, detune:0, mix:0.6},
+   adsr:{a:0.004, d:0.08, s:0.65, r:0.09},
+   vib:{rate:6.5, depth:12, delay:0.12},
+   filter:{type:'lowpass', freq:4000, q:1, lfoRate:0, lfoDepth:0} }},
+ {name:'Lead Sierra', fam:'Lead', desc:'Solista con cuerpo', inst:{
+   wave:'sawtooth', vol:0.7,
+   adsr:{a:0.006, d:0.1, s:0.6, r:0.1},
+   vib:{rate:5.5, depth:12, delay:0.2},
+   filter:{type:'lowpass', freq:3200, q:2, lfoRate:0, lfoDepth:0} }},
+ {name:'Lead Supersaw', fam:'Lead', desc:'Apilado ancho y épico', inst:{
+   wave:'sawtooth', vol:0.6,
+   unison:{voices:7, detune:22, spread:0.85},
+   adsr:{a:0.02, d:0.1, s:0.75, r:0.25},
+   filter:{type:'lowpass', freq:5200, q:1, lfoRate:0, lfoDepth:0},
+   fx:{reverb:{on:true, size:2.2, mix:0.22}} }},
+ {name:'Lead Chip Arpegiado', fam:'Lead', desc:'Arpegio veloz 8-bit', inst:{
+   wave:'square', vol:0.6,
+   adsr:{a:0.002, d:0.05, s:0.5, r:0.05},
+   arp:{on:true, rate:16, pattern:[0,4,7,12], mode:'up'},
+   fx:{crush:{on:true, bits:6}} }},
+ {name:'Silbido', fam:'Lead', desc:'Seno puro con vibrato humano', inst:{
+   wave:'sine', vol:0.8,
+   adsr:{a:0.03, d:0.1, s:0.85, r:0.15},
+   vib:{rate:5.8, depth:16, delay:0.3},
+   filter:{type:'lowpass', freq:3000, q:0.5, lfoRate:0, lfoDepth:0} }},
+
+ // ───────────── SINTES: PADS ─────────────
+ {name:'Pad Cálido', fam:'Pad', desc:'Colchón suave y envolvente', inst:{
+   wave:'triangle', vol:0.6,
+   unison:{voices:3, detune:12, spread:0.6},
+   adsr:{a:0.7, d:0.4, s:0.85, r:1.4},
+   filter:{type:'lowpass', freq:2200, q:0.7, lfoRate:0.12, lfoDepth:250},
+   fx:{chorus:{on:true, rate:0.4, depth:0.006, mix:0.45}, reverb:{on:true, size:3, mix:0.4}} }},
+ {name:'Pad Cristal', fam:'Pad', desc:'Brillante con capa de octava', inst:{
+   wave:'triangle', vol:0.55,
+   osc2:{on:true, wave:'sine', semis:12, detune:4, mix:0.4},
+   adsr:{a:1.0, d:0.5, s:0.85, r:1.8},
+   vib:{rate:3, depth:6, delay:0.6},
+   fx:{chorus:{on:true, rate:0.35, depth:0.007, mix:0.5}, reverb:{on:true, size:3.5, mix:0.45}} }},
+ {name:'Pad de Cuerdas', fam:'Pad', desc:'Sección lenta y coral', inst:{
+   wave:'sawtooth', vol:0.42,
+   unison:{voices:5, detune:16, spread:0.7},
+   adsr:{a:0.8, d:0.4, s:0.85, r:1.5},
+   filter:{type:'lowpass', freq:2000, q:0.8, lfoRate:0.15, lfoDepth:300},
+   fx:{chorus:{on:true, rate:0.4, depth:0.006, mix:0.4}, reverb:{on:true, size:3.2, mix:0.4}} }},
+ {name:'Coro Vocal', fam:'Pad', desc:'Voces "aah" sintéticas', inst:{
+   wave:'sawtooth', vol:0.45,
+   unison:{voices:4, detune:14, spread:0.6},
+   adsr:{a:0.5, d:0.3, s:0.8, r:1.0},
+   vib:{rate:4.5, depth:8, delay:0.5},
+   filter:{type:'bandpass', freq:900, q:1.8, lfoRate:0.2, lfoDepth:200},
+   fx:{reverb:{on:true, size:3, mix:0.4}} }},
+ {name:'Dron Ambiente', fam:'Pad', desc:'Fondo etéreo y quieto', inst:{
+   wave:'sine', vol:0.85,
+   sub:{on:true, wave:'sine', octave:-1, mix:0.3},
+   adsr:{a:1.6, d:0.6, s:1.0, r:2.2},
+   trem:{rate:0.8, depth:0.4},
+   fx:{reverb:{on:true, size:4, mix:0.5}} }},
+
+ // ───────────── PERCUSIÓN (ruido con altura = color) ─────────────
+ {name:'Bombo', fam:'Percusión', desc:'Golpe grave con caída de tono', inst:{
+   wave:'sine', vol:1.0,
+   adsr:{a:0.002, d:0.12, s:0.0, r:0.08},
+   pitchEnv:{amt:28, time:0.06} }},
+ {name:'Caja', fam:'Percusión', desc:'Ruido con cuerpo medio', inst:{
+   wave:'noise', vol:0.85,
+   adsr:{a:0.002, d:0.12, s:0.0, r:0.1},
+   filter:{type:'highpass', freq:900, q:0.7, lfoRate:0, lfoDepth:0} }},
+ {name:'Hi-Hat Cerrado', fam:'Percusión', desc:'Ruido agudo muy corto', inst:{
+   wave:'noise', vol:0.9,
+   adsr:{a:0.001, d:0.03, s:0.0, r:0.03},
+   filter:{type:'highpass', freq:6000, q:0.7, lfoRate:0, lfoDepth:0} }},
+ {name:'Hi-Hat Abierto', fam:'Percusión', desc:'Ruido agudo con cola', inst:{
+   wave:'noise', vol:0.85,
+   adsr:{a:0.001, d:0.25, s:0.0, r:0.2},
+   filter:{type:'highpass', freq:6000, q:0.7, lfoRate:0, lfoDepth:0} }},
+ {name:'Tom', fam:'Percusión', desc:'Ruido grave afinado', inst:{
+   wave:'noise', vol:0.9,
+   adsr:{a:0.002, d:0.18, s:0.0, r:0.12},
+   filter:{type:'lowpass', freq:600, q:2, lfoRate:0, lfoDepth:0} }},
+ {name:'Platillo', fam:'Percusión', desc:'Ruido brillante y largo', inst:{
+   wave:'noise', vol:0.4,
+   adsr:{a:0.002, d:0.6, s:0.05, r:0.5},
+   filter:{type:'highpass', freq:5000, q:0.5, lfoRate:0, lfoDepth:0},
+   fx:{reverb:{on:true, size:2, mix:0.25}} }},
+ {name:'Clave', fam:'Percusión', desc:'Clic seco de madera', inst:{
+   wave:'square', vol:0.7,
+   adsr:{a:0.001, d:0.05, s:0.0, r:0.03},
+   pitchEnv:{amt:12, time:0.01},
+   filter:{type:'bandpass', freq:2000, q:3, lfoRate:0, lfoDepth:0} }},
 ];
+
+
+// FACTORY_PRESETS se mantiene por compatibilidad, ahora derivado de la biblioteca de instrumentos.
+const FACTORY_PRESETS=INSTRUMENT_LIBRARY.map(e=>({name:e.name, cat:e.fam, inst:e.inst}));
+function defInst(name){ const e=INSTRUMENT_LIBRARY.find(i=>i.name===name); return e?e.inst:INSTRUMENT_LIBRARY[0].inst; }
+
 
 /* ── piezas de ejemplo (importables para estudiar y editar) ── */
 const EXAMPLE_SONGS={
@@ -1277,10 +1922,10 @@ const EXAMPLE_SONGS={
 
 /* ── estado del proyecto ── */
 let _id=1; const uid=()=>'n'+(_id++);
-function newTrack(name,inst,layer){
-  const filled=VS.fillInst(inst||FACTORY_PRESETS[0].inst); // completa campos nuevos en presets antiguos
+function newTrack(name,inst,layer,instName){
+  const filled=VS.fillInst(inst||INSTRUMENT_LIBRARY[0].inst); // completa campos nuevos en presets antiguos
   return {id:uid(), name:name||('Pista '+(project.tracks.length+1)), layer:layer||'base',
-          mute:false, solo:false, volume:0.5, pan:0,
+          mute:false, solo:false, volume:0.5, pan:0, instName:instName||null,
           inst:JSON.parse(JSON.stringify(filled)),
           notes:[], autoVol:[], autoCut:[]};
 }
@@ -1305,7 +1950,7 @@ function renderTracks(){
     div.innerHTML='<div class="t-name"><span>'+esc(t.name)+'</span><span>'
       +'<span class="mini '+(t.mute?'on':'')+'" data-act="mute">M</span> '
       +'<span class="mini '+(t.solo?'solo-on':'')+'" data-act="solo">S</span></span></div>'
-      +'<div class="t-meta"><span>'+esc(t.inst.wave||'square')+'</span><span>·</span><span>capa: '+esc(t.layer)+'</span></div>';
+      +'<div class="t-meta"><span>'+esc(t.instName||({sine:'seno',square:'cuadrada',triangle:'triángulo',sawtooth:'sierra',noise:'ruido'}[t.inst.wave]||t.inst.wave||'square'))+'</span><span>·</span><span>'+esc(t.layer)+'</span></div>';
     div.onclick=e=>{
       const act=e.target.dataset&&e.target.dataset.act;
       if(act==='mute'){t.mute=!t.mute; VS.refreshGates(0.15); renderTracks(); return;}
@@ -1343,6 +1988,7 @@ function applyLayers(){
 
 /* ═══════════════════ PIANO ROLL ═══════════════════ */
 const canvas=$('roll-canvas'), ctx2=canvas.getContext('2d');
+const phCanvas=$('playhead-canvas'), phCtx=phCanvas.getContext('2d');
 const autoCanvas=$('auto-canvas'), autoCtx=autoCanvas.getContext('2d');
 function rollWidth(){ return KEYW+totalBeats()*ui.ppb; }
 function resizeRoll(){
@@ -1351,6 +1997,9 @@ function resizeRoll(){
   canvas.width=w*dpr; canvas.height=h*dpr;
   canvas.style.width=w+'px'; canvas.style.height=h+'px';
   ctx2.setTransform(dpr,0,0,dpr,0,0);
+  phCanvas.width=w*dpr; phCanvas.height=h*dpr;
+  phCanvas.style.width=w+'px'; phCanvas.style.height=h+'px';
+  phCtx.setTransform(dpr,0,0,dpr,0,0);
   autoCanvas.width=w*dpr; autoCanvas.style.width=w+'px';
   autoCanvas.height=64*dpr; autoCanvas.style.height='64px';
   autoCtx.setTransform(dpr,0,0,dpr,0,0);
@@ -1358,39 +2007,26 @@ function resizeRoll(){
 function drawRoll(){
   const W=rollWidth(), H=ROWS*ROWH, TB=totalBeats(), bpb=project.beatsPerBar;
   ctx2.clearRect(0,0,W,H);
-  /* fondo por fila */
   for(let r=0;r<ROWS;r++){
     const black=BLACK.test(ROW_NAMES[r]);
     ctx2.fillStyle=black?'#050505':'#0b0b0b';
     ctx2.fillRect(KEYW,r*ROWH,W-KEYW,ROWH);
     if(ROW_NAMES[r][0]==='C'&&!black){ ctx2.fillStyle='#111'; ctx2.fillRect(KEYW,r*ROWH+ROWH-1,W-KEYW,1); }
   }
-  /* rejilla vertical */
   for(let b=0;b<=TB;b++){
     const x=KEYW+b*ui.ppb;
     ctx2.fillStyle=(b%bpb===0)?'#2e2e2e':'#171717';
     ctx2.fillRect(x,0,1,H);
-    if(ui.snap<1){
-      for(let s=ui.snap;s<1;s+=ui.snap){
-        ctx2.fillStyle='#101010';
-        ctx2.fillRect(KEYW+(b+s)*ui.ppb,0,1,H);
-      }
-    }
+    if(ui.snap<1){ for(let s=ui.snap;s<1;s+=ui.snap){ ctx2.fillStyle='#101010'; ctx2.fillRect(KEYW+(b+s)*ui.ppb,0,1,H); } }
   }
-  /* números de compás */
   ctx2.fillStyle='#5a5a5a'; ctx2.font='9px monospace';
-  for(let bar=0;bar<project.bars;bar++)
-    ctx2.fillText(String(bar+1),KEYW+bar*bpb*ui.ppb+3,9);
-  /* notas de otras pistas (fantasma) */
+  for(let bar=0;bar<project.bars;bar++) ctx2.fillText(String(bar+1),KEYW+bar*bpb*ui.ppb+3,9);
   project.tracks.forEach((t,ti)=>{
     if(ti===sel.track)return;
     ctx2.fillStyle='rgba(120,120,120,0.22)';
-    (t.notes||[]).forEach(n=>{
-      const r=ROW_IDX[n.n]; if(r==null)return;
-      ctx2.fillRect(KEYW+n.s*ui.ppb+0.5, r*ROWH+2, Math.max(2,n.d*ui.ppb-1), ROWH-4);
-    });
+    (t.notes||[]).forEach(n=>{ const r=ROW_IDX[n.n]; if(r==null)return;
+      ctx2.fillRect(KEYW+n.s*ui.ppb+0.5, r*ROWH+2, Math.max(2,n.d*ui.ppb-1), ROWH-4); });
   });
-  /* notas de la pista activa */
   const t=curTrack();
   if(t)(t.notes||[]).forEach(n=>{
     const r=ROW_IDX[n.n]; if(r==null)return;
@@ -1402,45 +2038,43 @@ function drawRoll(){
     ctx2.strokeStyle=isSel?'#e8a33d':'#666';
     ctx2.strokeRect(x+0.5,y+0.5,w-1,h-1);
     ctx2.fillStyle=isSel?'#e8a33d':'#888';
-    ctx2.fillRect(x+w-3,y,3,h);   /* asa de duración */
+    ctx2.fillRect(x+w-3,y,3,h);
   });
-  /* teclado */
   for(let r=0;r<ROWS;r++){
     const name=ROW_NAMES[r], black=BLACK.test(name);
     ctx2.fillStyle=black?'#101010':'#d8d8d8';
     ctx2.fillRect(0,r*ROWH,KEYW,ROWH);
     ctx2.fillStyle='#1f1f1f'; ctx2.fillRect(0,r*ROWH,KEYW,1);
-    if(name[0]==='C'&&!black){
-      ctx2.fillStyle='#333'; ctx2.font='9px monospace';
-      ctx2.fillText(name,4,r*ROWH+10);
-    }
+    if(name[0]==='C'&&!black){ ctx2.fillStyle='#333'; ctx2.font='9px monospace'; ctx2.fillText(name,4,r*ROWH+10); }
   }
   ctx2.fillStyle='#2e2e2e'; ctx2.fillRect(KEYW-1,0,1,H);
-  drawPlayhead();
   drawAutoLane();
 }
-/* playhead dibujado encima con rAF sin repintar todo */
-let lastPlayX=-1;
+/* playhead en canvas OVERLAY separado: el roll principal NO se toca al reproducir */
 function drawPlayhead(){
+  const W=rollWidth(), H=ROWS*ROWH;
+  phCtx.clearRect(0,0,W,H);
   if(!VS.state.playing)return;
   const c=VS.ctx(); if(!c||!VS.state.passDur)return;
   const frac=Math.max(0,Math.min(1,(c.currentTime-VS.state.passStart)/VS.state.passDur));
   const x=KEYW+frac*totalBeats()*ui.ppb;
-  ctx2.fillStyle='rgba(232,163,61,0.9)';
-  ctx2.fillRect(x,0,1.5,ROWS*ROWH);
-  ctx2.fillStyle='rgba(232,163,61,0.12)';
-  ctx2.fillRect(x-4,0,4,ROWS*ROWH);
+  phCtx.fillStyle='rgba(232,163,61,0.12)';
+  phCtx.fillRect(x-4,0,4,H);
+  phCtx.fillStyle='rgba(232,163,61,0.9)';
+  phCtx.fillRect(x,0,1.5,H);
 }
+let _lastPosText='';
 function rafLoop(){
   if(VS.state.playing){
-    drawRoll();
+    drawPlayhead();  // solo el overlay, coste mínimo
     const c=VS.ctx();
     if(c&&VS.state.spb){
       const beat=Math.max(0,(c.currentTime-VS.state.passStart)/VS.state.spb);
       const bar=Math.floor(beat/project.beatsPerBar)+1;
       const bt=Math.floor(beat%project.beatsPerBar)+1;
       const sub=Math.floor((beat%1)*100);
-      $('pos-display').textContent=bar+'.'+bt+'.'+String(sub).padStart(2,'0');
+      const txt=bar+'.'+bt+'.'+String(sub).padStart(2,'0');
+      if(txt!==_lastPosText){ $('pos-display').textContent=txt; _lastPosText=txt; }
     }
   }
   requestAnimationFrame(rafLoop);
@@ -1697,6 +2331,38 @@ function renderSide(){
   if(!t){ host.innerHTML='<div class="note" style="color:var(--ink-dim)">Crea una pista para empezar.</div>'; return; }
   const I=t.inst=VS.fillInst(t.inst);
   if(ui.tab==='inst'){
+    /* ── instrumento (biblioteca) ── */
+    let ib=sec(host,'INSTRUMENTO');
+    const pick=document.createElement('div'); pick.className='ctl-row';
+    const sel=document.createElement('select'); sel.style.flex='1';
+    const og0=document.createElement('optgroup'); og0.label='— formas de onda básicas —';
+    [['sine','Seno'],['square','Cuadrada'],['triangle','Triángulo'],['sawtooth','Sierra'],['noise','Ruido']].forEach(([v,n])=>{
+      const o=document.createElement('option'); o.value='wave:'+v; o.textContent=n; og0.appendChild(o);
+    });
+    sel.appendChild(og0);
+    const byFam={}; INSTRUMENT_LIBRARY.forEach((e,i)=>{ (byFam[e.fam]=byFam[e.fam]||[]).push(i); });
+    Object.keys(byFam).forEach(fam=>{
+      const og=document.createElement('optgroup'); og.label=fam;
+      byFam[fam].forEach(i=>{ const o=document.createElement('option'); o.value='lib:'+i; o.textContent=INSTRUMENT_LIBRARY[i].name;
+        if(t.instName===INSTRUMENT_LIBRARY[i].name)o.selected=true; og.appendChild(o); });
+      sel.appendChild(og);
+    });
+    if(t.instName){ /* ya seleccionado arriba */ }
+    else { [...sel.querySelectorAll('option')].forEach(o=>{ if(o.value==='wave:'+I.wave && !t.instName)o.selected=true; }); }
+    sel.addEventListener('change',()=>{
+      const v=sel.value;
+      if(v.startsWith('lib:')){ applyInstrument(INSTRUMENT_LIBRARY[+v.slice(4)]); }
+      else { const w=v.slice(5); I.wave=w; t.instName=null; renderSide(); onInstChange(); VS.previewNote(I,'C4',0.3); }
+    });
+    const lab=document.createElement('label'); lab.textContent='Elegir';
+    pick.appendChild(lab); pick.appendChild(sel); ib.appendChild(pick);
+    const openLib=document.createElement('div'); openLib.className='ctl-row';
+    const bl=document.createElement('button'); bl.className='acc'; bl.textContent='Abrir biblioteca completa…'; bl.style.flex='1';
+    bl.onclick=()=>{ renderPresets(); $('modal-presets').classList.add('show'); };
+    openLib.appendChild(bl); ib.appendChild(openLib);
+    const hint=document.createElement('div'); hint.className='ctl-row';
+    hint.innerHTML='<label style="min-width:0;color:var(--ink-dim)">Elige un instrumento y ajusta los controles de abajo para afinarlo a tu gusto. Todo es síntesis en vivo: no usa archivos de audio.</label>';
+    ib.appendChild(hint);
     /* ── pista ── */
     let b=sec(host,'PISTA');
     const rowN=document.createElement('div'); rowN.className='ctl-row';
@@ -1714,7 +2380,7 @@ function renderSide(){
       const btn=document.createElement('button');
       btn.textContent=({sine:'seno',square:'cuadrada',triangle:'triángulo',sawtooth:'sierra',noise:'ruido'})[w];
       btn.className=I.wave===w?'on':'';
-      btn.onclick=()=>{ I.wave=w; renderSide(); onInstChange(); VS.previewNote(I,'C4',0.3); };
+      btn.onclick=()=>{ I.wave=w; t.instName=null; renderSide(); onInstChange(); VS.previewNote(I,'C4',0.3); };
       wb.appendChild(btn);
     });
     b.appendChild(wb);
@@ -1885,12 +2551,14 @@ function liveSong(){
   return { name:project.name, bpm:project.bpm, beatsPerBar:project.beatsPerBar,
            bars:project.bars, loop:ui.loop, volume:project.volume, swing:project.swing||0,
            tracks:project.tracks.map(t=>({
-             name:t.name, layer:t.layer, volume:t.volume, pan:t.pan, mute:t.mute, solo:t.solo,
+             name:t.name, layer:t.layer, volume:t.volume, pan:t.pan, mute:t.mute, solo:t.solo, instName:t.instName||null,
              inst:t.inst, autoVol:t.autoVol, autoCut:t.autoCut,
              notes:t.notes.map(n=>[n.n,n.s,n.d,n.v!=null?n.v:1])
            })) };
 }
 function togglePlay(){
+  // desbloquear/reanudar el contexto de audio (los navegadores lo suspenden hasta un gesto)
+  try{ const c=VS.ctx(); if(c && c.state!=='running') c.resume(); }catch(e){}
   if(VS.state.playing){ stopPlay(); return; }
   const on=Object.keys(layerState).filter(l=>layerState[l]!==false);
   VS.play(liveSong,{
@@ -1901,11 +2569,17 @@ function togglePlay(){
   });
   $('btn-play').textContent='⏸';
 }
+// desbloqueo global del audio en el primer gesto (clic/tecla/toque) en cualquier parte
+function _unlockAudio(){
+  try{ const c=VS.ctx(); if(c && c.state!=='running') c.resume(); }catch(e){}
+}
+['pointerdown','keydown','touchstart'].forEach(ev=>
+  window.addEventListener(ev,_unlockAudio,{once:false,passive:true}));
 function stopPlay(){
   VS.stop(0.25);
   $('btn-play').textContent='⏵';
   $('pos-display').textContent='1.1.00';
-  setTimeout(drawRoll,60);
+  phCtx.clearRect(0,0,rollWidth(),ROWS*ROWH); // borrar el cursor del overlay
 }
 $('btn-play').onclick=togglePlay;
 $('btn-stop').onclick=stopPlay;
@@ -1939,7 +2613,7 @@ $('roll-scroll').addEventListener('scroll',()=>{ $('auto-scroll').scrollLeft=$('
 
 /* ═══════════════════ PISTAS: añadir / duplicar / borrar ═══════════════════ */
 $('btn-add-track').onclick=()=>{
-  project.tracks.push(newTrack(null,FACTORY_PRESETS[0].inst));
+  project.tracks.push(newTrack(null, defInst('Lead Cuadrado'), 'base', 'Lead Cuadrado'));
   sel.track=project.tracks.length-1; sel.note=null;
   if(VS.state.playing)restartPlayback();
   renderAll();
@@ -1961,29 +2635,78 @@ $('btn-del-track').onclick=()=>{
 };
 function restartPlayback(){ stopPlay(); setTimeout(togglePlay,80); }
 
-/* ═══════════════════ PRESETS ═══════════════════ */
-function renderPresets(){
-  const host=$('preset-list'); host.innerHTML='';
-  const all=[...FACTORY_PRESETS.map(p=>({...p,user:false})),
-             ...project.userPresets.map(p=>({...p,user:true}))];
-  all.forEach(p=>{
-    const d=document.createElement('div'); d.className='preset-item';
-    d.innerHTML='<span>'+esc(p.name)+(p.user?' <span class="p-cat">[propio]</span>':'')+'</span><span class="p-cat">'+esc(p.cat||'')+'</span>';
-    d.onclick=()=>{
-      const t=curTrack(); if(!t){toast('Crea una pista primero'); return;}
-      t.inst=VS.fillInst(JSON.parse(JSON.stringify(p.inst)));
-      VS.refreshLive(); renderAll();
-      VS.previewNote(t.inst, t.inst.wave==='noise'?'C3':'C4', 0.5);
-      toast('Instrumento aplicado: '+p.name);
-    };
-    host.appendChild(d);
-  });
+/* ═══════════════════ BIBLIOTECA DE INSTRUMENTOS ═══════════════════ */
+// aplica un instrumento nombrado a la pista actual y recuerda el nombre para mostrarlo
+function applyInstrument(entry){
+  const t=curTrack(); if(!t){toast('Crea una pista primero'); return;}
+  t.inst=VS.fillInst(JSON.parse(JSON.stringify(entry.inst)));
+  t.instName=entry.name;                 // etiqueta legible del instrumento
+  VS.refreshLive(); renderAll();
+  VS.previewNote(t.inst, t.inst.wave==='noise'?'C3':'C4', 0.5);
+  toast('Instrumento: '+entry.name);
 }
+let presetSearch='', presetFam='';
+function populateFamFilter(){
+  const sel=$('inst-fam-filter'); if(sel.dataset.done)return;
+  const fams=[...new Set(INSTRUMENT_LIBRARY.map(i=>i.fam))];
+  fams.forEach(f=>{ const o=document.createElement('option'); o.value=f; o.textContent=f; sel.appendChild(o); });
+  sel.dataset.done='1';
+}
+function renderPresets(){
+  populateFamFilter();
+  const host=$('preset-list'); host.innerHTML='';
+  const q=presetSearch.trim().toLowerCase();
+  const match=e=>(!presetFam||e.fam===presetFam)&&(!q||(e.name+' '+(e.desc||'')+' '+e.fam).toLowerCase().includes(q));
+  // agrupar la biblioteca por familia
+  const fams=[...new Set(INSTRUMENT_LIBRARY.map(i=>i.fam))];
+  let shown=0;
+  fams.forEach(fam=>{
+    const items=INSTRUMENT_LIBRARY.filter(i=>i.fam===fam&&match(i));
+    if(!items.length)return;
+    const hd=document.createElement('div');
+    hd.textContent=fam;
+    hd.style.cssText='padding:5px 12px; background:var(--bg2); color:var(--acc); font-size:10px; letter-spacing:2px; border-bottom:1px solid var(--line); position:sticky; top:0';
+    host.appendChild(hd);
+    items.forEach(e=>{
+      shown++;
+      const d=document.createElement('div'); d.className='preset-item';
+      const isCur=curTrack()&&curTrack().instName===e.name;
+      d.innerHTML='<span style="flex:1"><b style="color:'+(isCur?'var(--acc)':'var(--ink)')+'">'+esc(e.name)+'</b>'
+        +'<span class="p-cat" style="display:block">'+esc(e.desc||'')+'</span></span>'
+        +'<button class="mini" style="align-self:center">▸ probar</button>';
+      d.querySelector('button').onclick=ev=>{ ev.stopPropagation(); VS.previewNote(VS.fillInst(e.inst), e.inst.wave==='noise'?'C3':'C4', 0.6); };
+      d.onclick=()=>applyInstrument(e);
+      host.appendChild(d);
+    });
+  });
+  // presets propios del usuario
+  if(project.userPresets&&project.userPresets.length){
+    const ups=project.userPresets.filter(match);
+    if(ups.length){
+      const hd=document.createElement('div'); hd.textContent='MIS PRESETS';
+      hd.style.cssText='padding:5px 12px; background:var(--bg2); color:var(--acc); font-size:10px; letter-spacing:2px; border-bottom:1px solid var(--line)';
+      host.appendChild(hd);
+      ups.forEach(e=>{
+        shown++;
+        const d=document.createElement('div'); d.className='preset-item';
+        d.innerHTML='<span style="flex:1"><b>'+esc(e.name)+'</b></span><button class="mini" data-a="del" style="align-self:center">✕</button>';
+        d.querySelector('button').onclick=ev=>{ ev.stopPropagation();
+          project.userPresets=project.userPresets.filter(x=>x!==e); renderPresets(); };
+        d.onclick=()=>applyInstrument({name:e.name,inst:e.inst});
+        host.appendChild(d);
+      });
+    }
+  }
+  if(!shown){ const e=document.createElement('div'); e.className='note'; e.style.padding='20px'; e.style.textAlign='center';
+    e.textContent='Sin resultados para "'+presetSearch+'".'; host.appendChild(e); }
+}
+$('inst-search').addEventListener('input',()=>{ presetSearch=$('inst-search').value; renderPresets(); });
+$('inst-fam-filter').addEventListener('change',()=>{ presetFam=$('inst-fam-filter').value; renderPresets(); });
 $('btn-save-preset').onclick=()=>{
   const t=curTrack(); if(!t)return;
-  const name=prompt('Nombre del preset:', t.name);
+  const name=prompt('Nombre del preset:', t.instName||t.name);
   if(!name)return;
-  project.userPresets.push({name:name, cat:'propio', inst:JSON.parse(JSON.stringify(t.inst))});
+  project.userPresets.push({name:name, fam:'Mis presets', inst:JSON.parse(JSON.stringify(t.inst))});
   renderPresets(); toast('Preset guardado en el proyecto');
 };
 
@@ -2113,7 +2836,7 @@ function exportEngine(){
 }
 function exportJSON(){
   const data={ _forja:1, ...project,
-    tracks:project.tracks.map(t=>({name:t.name,layer:t.layer,volume:t.volume,pan:t.pan,
+    tracks:project.tracks.map(t=>({name:t.name,layer:t.layer,volume:t.volume,pan:t.pan,instName:t.instName||null,
       inst:t.inst, autoVol:t.autoVol, autoCut:t.autoCut,
       notes:t.notes.map(n=>[n.n,n.s,n.d,n.v!=null?n.v:1])})) };
   return {code:JSON.stringify(data,null,1),
@@ -2235,7 +2958,7 @@ function saveStore(o){ try{ localStorage.setItem(STORE_KEY,JSON.stringify(o)); r
 function projectSnapshot(){
   return { name:project.name, bpm:project.bpm, beatsPerBar:project.beatsPerBar, bars:project.bars,
     volume:project.volume, swing:project.swing||0, userPresets:project.userPresets||[],
-    tracks:project.tracks.map(t=>({name:t.name,layer:t.layer,volume:t.volume,pan:t.pan,
+    tracks:project.tracks.map(t=>({name:t.name,layer:t.layer,volume:t.volume,pan:t.pan,instName:t.instName||null,
       inst:t.inst, autoVol:t.autoVol, autoCut:t.autoCut,
       notes:t.notes.map(n=>[n.n,n.s,n.d,n.v!=null?n.v:1])})) };
 }
@@ -2338,7 +3061,7 @@ function importNativeSeq(seq,bpm,name){
 }
 function importProject(data){
   const tracks=(data.tracks||[]).map((t,i)=>{
-    const tr=newTrack(t.name||('Pista '+(i+1)), t.inst, t.layer);
+    const tr=newTrack(t.name||('Pista '+(i+1)), t.inst, t.layer, t.instName||null);
     tr.volume=(t.volume!=null?t.volume:0.5); tr.pan=t.pan||0;
     tr.autoVol=t.autoVol||[]; tr.autoCut=t.autoCut||[];
     tr.notes=(t.notes||[]).map(n=>Array.isArray(n)
@@ -2374,6 +3097,180 @@ Object.keys(EXAMPLE_SONGS).forEach(k=>{
   };
   $('game-themes').appendChild(b);
 });
+
+/* ═══════════════════ IMPORTAR AUDIO (ingeniería inversa) ═══════════════════ */
+const AIN={ buffer:null, name:'', notes:[], bpm:null, mono:null };
+$('btn-audio-in').onclick=()=>{ $('modal-audio-in').classList.add('show'); };
+$('btn-load-audio').onclick=()=>$('audio-file-input').click();
+$('audio-file-input').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f)return;
+  $('ain-name').textContent='Decodificando '+f.name+'…';
+  try{
+    const ab=await f.arrayBuffer();
+    const buf=await VS.decodeAudio(ab);
+    AIN.buffer=buf; AIN.name=f.name; AIN.notes=[];
+    const longWarn = buf.duration>60 ? ' · audio largo: el análisis puede tardar unos segundos' : '';
+    $('ain-name').textContent=f.name+' — '+buf.numberOfChannels+' canal(es), '+Math.round(buf.sampleRate/1000)+' kHz'+longWarn;
+    $('ain-analysis').style.display='block';
+    $('ain-dur').textContent=buf.duration.toFixed(2)+' s';
+    drawAinWave();
+    // BPM automático al cargar (no bloqueante)
+    $('ain-bpm').textContent='calculando…';
+    setTimeout(()=>{ try{ AIN.bpm=VS.detectBPM(buf); $('ain-bpm').textContent=AIN.bpm?AIN.bpm+' BPM':'no detectado'; }catch(err){ $('ain-bpm').textContent='—'; } },30);
+    $('ain-actions').style.display='flex';
+    $('ain-add-notes').disabled=true; $('ain-replace').disabled=true; // hasta analizar
+    // pista visual: sugerir pulsar "Analizar melodía"
+    $('ain-notes-count').textContent='pulsa "Analizar melodía" para transcribir';
+  }catch(err){ $('ain-name').textContent='Error al decodificar: '+err.message+' (¿formato soportado por el navegador?)'; }
+});
+function drawAinWave(){
+  const cv=$('ain-wave'); if(!AIN.buffer)return;
+  const W=cv.clientWidth||680, H=90, dpr=window.devicePixelRatio||1;
+  cv.width=W*dpr; cv.height=H*dpr; const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H); g.fillStyle='#0a0a0a'; g.fillRect(0,0,W,H);
+  const data=VS.toMono(AIN.buffer); AIN.mono=data;
+  const step=Math.max(1,Math.floor(data.length/W));
+  g.strokeStyle='#3a3a3a'; g.beginPath(); g.moveTo(0,H/2); g.lineTo(W,H/2); g.stroke();
+  g.strokeStyle='#e8a33d'; g.beginPath();
+  for(let x=0;x<W;x++){
+    let min=1,max=-1;
+    for(let i=0;i<step;i++){ const v=data[x*step+i]||0; if(v<min)min=v; if(v>max)max=v; }
+    g.moveTo(x,H/2-max*H*0.46); g.lineTo(x,H/2-min*H*0.46);
+  }
+  g.stroke();
+  // superponer notas si existen
+  if(AIN.notes.length){
+    g.fillStyle='rgba(232,163,61,0.25)';
+    AIN.notes.forEach(n=>{ const x0=n.tStart/AIN.buffer.duration*W, x1=n.tEnd/AIN.buffer.duration*W;
+      g.fillRect(x0,2,Math.max(1,x1-x0),4); });
+  }
+}
+$('ain-use-bpm').onclick=()=>{
+  if(!AIN.bpm)return;
+  project.bpm=Math.max(30,Math.min(300,AIN.bpm)); $('in-bpm').value=project.bpm;
+  toast('BPM ajustado a '+project.bpm);
+};
+// sliders con etiqueta
+function ainSliderLabel(id,vid,fmt){ const s=$(id),v=$(vid); const u=()=>v.textContent=fmt(+s.value); s.addEventListener('input',u); u(); }
+ainSliderLabel('ain-sens','ain-sens-v',x=>x.toFixed(3));
+ainSliderLabel('ain-mindur','ain-mindur-v',x=>Math.round(x*1000)+'ms');
+$('ain-analyze').onclick=async()=>{
+  if(!AIN.buffer)return;
+  const btn=$('ain-analyze'); if(btn.disabled)return; btn.disabled=true;
+  const cnt=$('ain-notes-count'); cnt.textContent='analizando… 0%';
+  // sensibilidad (0.01..0.10): MÁS sensible = umbral YIN más alto y prob mínima más baja = más notas
+  const sens=+$('ain-sens').value;
+  const threshold=Math.max(0.08,Math.min(0.22, 0.08 + sens*1.6));  // umbral YIN
+  const probMin=Math.max(0.15,Math.min(0.5, 0.5 - sens*3));        // confianza mínima
+  const minDur=+$('ain-mindur').value;
+  // rango de frecuencia según el tipo de sonido elegido
+  const src=$('ain-source').value;
+  const range = src==='bass' ? {fmin:41, fmax:400}
+              : src==='treble' ? {fmin:200, fmax:2000}
+              : src==='full' ? {fmin:41, fmax:2000}
+              : {fmin:70, fmax:1300}; // general
+  try{
+    const r=await VS.analyzeMelodyAsync(AIN.buffer,{threshold,probMin,minDur,fmin:range.fmin,fmax:range.fmax},frac=>{
+      cnt.textContent='analizando… '+Math.round(frac*100)+'%';
+    });
+    let notes=r.notes.slice();
+    const shift=parseInt($('ain-octshift').value)||0;
+    if(shift){ notes.forEach(n=>{ const midi=(n.midi||60)+shift; const oct=Math.floor(midi/12)-1;
+      n.midi=midi; n.name=['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'][((midi%12)+12)%12]+oct; }); }
+    notes=notes.filter(n=>ROW_IDX[n.name]!=null);
+    AIN.notes=notes; AIN.frames=r.frames;
+    drawAinWave(); drawAinPiano();
+    $('ain-piano-wrap').style.display='block';
+    cnt.textContent = notes.length ? (notes.length+' nota(s) detectadas') : 'no se detectaron notas — sube la sensibilidad, cambia el tipo de sonido, o revisa que sea una melodía monofónica';
+    $('ain-add-notes').disabled=notes.length===0; $('ain-replace').disabled=notes.length===0;
+  }catch(e){ cnt.textContent='error: '+e.message; }
+  finally{ btn.disabled=false; }
+};
+function drawAinPiano(){
+  const cv=$('ain-piano'); const W=cv.clientWidth||680, H=120, dpr=window.devicePixelRatio||1;
+  cv.width=W*dpr; cv.height=H*dpr; const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H); g.fillStyle='#0a0a0a'; g.fillRect(0,0,W,H);
+  if(!AIN.notes.length||!AIN.buffer)return;
+  const midis=AIN.notes.map(n=>n.midi); const lo=Math.min(...midis)-1, hi=Math.max(...midis)+1;
+  const span=Math.max(1,hi-lo), rh=H/span, dur=AIN.buffer.duration;
+  // rejilla de octavas
+  for(let mm=lo;mm<=hi;mm++){ if(mm%12===0){ const y=H-(mm-lo)*rh; g.fillStyle='#151515'; g.fillRect(0,y-rh,W,rh); } }
+  g.fillStyle='#e8a33d';
+  AIN.notes.forEach(n=>{ const x0=n.tStart/dur*W, x1=n.tEnd/dur*W, y=H-(n.midi-lo)*rh;
+    g.fillRect(x0,y-rh+1,Math.max(2,x1-x0-1),rh-2); });
+}
+// convierte las notas detectadas (en segundos) a notas del proyecto (en negras)
+function ainNotesToProject(){
+  const bpm=AIN.bpm||project.bpm||120, spb=60/bpm;
+  const q=parseFloat($('ain-quant').value)||0;
+  return AIN.notes.map(n=>{
+    let s=n.tStart/spb, d=(n.tEnd-n.tStart)/spb;
+    if(q){ s=Math.round(s/q)*q; d=Math.max(q,Math.round(d/q)*q); }
+    return {id:uid(), n:n.name, s:round3(s), d:round3(Math.max(0.05,d)), v:1};
+  });
+}
+function ainNeededBars(notes){ let max=0; notes.forEach(n=>max=Math.max(max,n.s+n.d)); return Math.max(1,Math.ceil(max/project.beatsPerBar)); }
+$('ain-add-notes').onclick=()=>{
+  if(!AIN.notes.length)return;
+  const notes=ainNotesToProject();
+  const tr=newTrack('Transcripción', defInst('Piano'), 'base', 'Piano');
+  tr.volume=0.42; tr.notes=notes;
+  project.tracks.push(tr); sel.track=project.tracks.length-1; sel.note=null;
+  project.bars=Math.max(project.bars, ainNeededBars(notes));
+  if(AIN.bpm && Math.abs(project.bpm-AIN.bpm)>1){ project.bpm=AIN.bpm; }
+  // NO activar la referencia: se quiere escuchar las notas sintetizadas, no el audio original
+  syncTopbar(); renderAll(); resizeRoll(); drawRoll();
+  $('modal-audio-in').classList.remove('show');
+  toast(notes.length+' notas añadidas como pista');
+};
+$('ain-replace').onclick=()=>{
+  if(!AIN.notes.length)return;
+  const notes=ainNotesToProject();
+  stopPlay();
+  project={ name:(AIN.name||'audio').replace(/\.[^.]+$/,''), bpm:AIN.bpm||project.bpm, beatsPerBar:project.beatsPerBar,
+    bars:ainNeededBars(notes), volume:0.8, swing:0, tracks:[], userPresets:project.userPresets||[] };
+  const tr=newTrack('Transcripción', defInst('Piano'), 'base', 'Piano'); tr.volume=0.45; tr.notes=notes;
+  project.tracks=[tr]; sel={track:0,note:null}; layerState={};
+  // NO activar la referencia automáticamente (taparía las notas). Se activa aparte si se quiere.
+  VS.setReference(null); refState.on=false;
+  syncTopbar(); renderAll(); resizeRoll(); drawRoll(); renderRefBar();
+  $('modal-audio-in').classList.remove('show');
+  toast('Proyecto reemplazado con la transcripción');
+};
+$('ain-add-ref').onclick=()=>{
+  if(!AIN.buffer)return;
+  // referencia empieza APAGADA y a bajo volumen: se enciende manualmente para no tapar las notas
+  VS.setReference(AIN.buffer,0.35); refState.on=false; refState.gain=0.35; refState.name=AIN.name;
+  VS.enableReference(false);
+  if(AIN.bpm && Math.abs(project.bpm-AIN.bpm)>1){ project.bpm=AIN.bpm; $('in-bpm').value=project.bpm; }
+  renderRefBar();
+  $('modal-audio-in').classList.remove('show');
+  toast('Referencia añadida (apagada) — enciéndela en la barra si la quieres oír');
+};
+
+/* ── barra de control de la pista de referencia (aparece bajo el transporte) ── */
+const refState={ on:false, gain:0.5, name:'' };
+function renderRefBar(){
+  let bar=$('ref-bar');
+  if(!VS.state.refBuffer){ if(bar)bar.remove(); return; }
+  if(!bar){
+    bar=document.createElement('div'); bar.id='ref-bar';
+    bar.style.cssText='display:flex;gap:10px;align-items:center;padding:4px 10px;border-bottom:1px solid var(--line);background:#0e0b06;color:var(--ink-dim);font-size:11px;flex-wrap:wrap';
+    $('transport').after(bar);
+  }
+  const dur=VS.state.refBuffer.duration.toFixed(1);
+  bar.innerHTML='<span style="color:var(--acc)">♪ REFERENCIA</span>'
+    +'<span>'+esc(refState.name||'audio')+' ('+dur+'s)</span>'
+    +'<button class="mini" id="ref-toggle">'+(refState.on?'sonando':'silenciada')+'</button>'
+    +'<span>Vol</span><input type="range" id="ref-vol" min="0" max="1" step="0.02" value="'+refState.gain+'" style="width:80px">'
+    +'<span>Inicio</span><input type="range" id="ref-off" min="0" max="'+Math.max(0.1,VS.state.refBuffer.duration).toFixed(2)+'" step="0.01" value="'+(VS.state.refOffset||0)+'" style="width:90px"><span id="ref-off-v">'+(VS.state.refOffset||0).toFixed(2)+'s</span>'
+    +'<button class="mini" id="ref-remove">quitar ✕</button>';
+  $('ref-toggle').onclick=()=>{ refState.on=!refState.on; VS.enableReference(refState.on); renderRefBar(); if(VS.state.playing)restartPlayback(); };
+  $('ref-vol').addEventListener('input',e=>{ refState.gain=+e.target.value; VS.setReferenceGain(refState.gain); });
+  $('ref-off').addEventListener('input',e=>{ VS.setReferenceOffset(+e.target.value); $('ref-off-v').textContent=(+e.target.value).toFixed(2)+'s'; });
+  $('ref-remove').onclick=()=>{ VS.setReference(null); refState.on=false; renderRefBar(); if(VS.state.playing)restartPlayback(); toast('Referencia eliminada'); };
+}
+window.addEventListener('resize',()=>{ if($('ain-analysis')&&$('ain-analysis').style.display!=='none'){ drawAinWave(); if(AIN.notes.length)drawAinPiano(); } });
 
 /* ═══════════════════ MODALES / VARIOS ═══════════════════ */
 document.querySelectorAll('.close').forEach(x=>{
@@ -2421,28 +3318,35 @@ function renderAll(){ renderTracks(); renderSide(); drawRoll(); updateInspector(
 }
 
 /* ═══════════════════ PROYECTO DEMO ═══════════════════ */
+function libInst(name){ return INSTRUMENT_LIBRARY.find(i=>i.name===name); }
 function loadDemo(){
   project={ name:'demo-forja', bpm:110, beatsPerBar:4, bars:4, volume:0.8, swing:0, tracks:[], userPresets:[] };
-  const lead=newTrack('Melodía', FACTORY_PRESETS[2].inst, 'base');
-  lead.volume=0.42;
+  const L=libInst('Flauta');
+  const lead=newTrack('Flauta', L.inst, 'base', L.name);
+  lead.volume=0.5;
   [['A3',0,1],['C4',1,0.5],['E4',1.5,0.5],['A4',2,1.5],['G4',3.5,0.5],
    ['E4',4,1],['D4',5,1],['C4',6,1.5],['A3',7.5,0.5],
    ['E4',8,1],['F4',9,0.5],['E4',9.5,0.5],['D4',10,1],['E4',11,1],
    ['A3',12,2],['E4',14,1],['A3',15,1]
   ].forEach(([n,s,d])=>lead.notes.push({id:uid(),n:n,s:s,d:d,v:1}));
-  const bass=newTrack('Bajo', FACTORY_PRESETS[4].inst, 'base');
-  bass.volume=0.4;
+  const B=libInst('Bajo Eléctrico');
+  const bass=newTrack('Bajo', B.inst, 'base', B.name);
+  bass.volume=0.5;
   [['A2',0,2],['A2',2,2],['F2',4,2],['G2',6,2],['A2',8,2],['D3',10,2],['A2',12,2],['E2',14,2]
   ].forEach(([n,s,d])=>bass.notes.push({id:uid(),n:n,s:s,d:d,v:0.9}));
-  const perc=newTrack('Percusión', FACTORY_PRESETS[13].inst, 'combate');
-  perc.volume=0.5;
-  for(let b=0;b<16;b+=2)perc.notes.push({id:uid(),n:'C2',s:b,d:0.25,v:1});
-  for(let b=1;b<16;b+=2)perc.notes.push({id:uid(),n:'A5',s:b,d:0.15,v:0.5});
-  const pad=newTrack('Pad', FACTORY_PRESETS[7].inst, 'locura');
-  pad.volume=0.3; pad.pan=0.2;
+  const K=libInst('Bombo'), SN=libInst('Caja'), HH=libInst('Hi-Hat Cerrado');
+  const kick=newTrack('Bombo', K.inst, 'combate', K.name); kick.volume=0.6;
+  for(let b=0;b<16;b+=2)kick.notes.push({id:uid(),n:'C2',s:b,d:0.25,v:1});
+  const snare=newTrack('Caja', SN.inst, 'combate', SN.name); snare.volume=0.5;
+  for(let b=1;b<16;b+=2)snare.notes.push({id:uid(),n:'C3',s:b,d:0.2,v:0.9});
+  const hats=newTrack('Hi-Hat', HH.inst, 'combate', HH.name); hats.volume=0.4;
+  for(let b=0;b<16;b+=0.5)hats.notes.push({id:uid(),n:'A5',s:b,d:0.15,v:b%1===0?0.7:0.4});
+  const P=libInst('Pad de Cuerdas');
+  const pad=newTrack('Cuerdas', P.inst, 'locura', P.name);
+  pad.volume=0.35; pad.pan=0.15;
   [['A3',0,4],['F3',4,4],['A3',8,4],['E3',12,4]
   ].forEach(([n,s,d])=>pad.notes.push({id:uid(),n:n,s:s,d:d,v:0.8}));
-  project.tracks=[lead,bass,perc,pad];
+  project.tracks=[lead,bass,kick,snare,hats,pad];
 }
 
 /* ═══════════════════ AUTO-GUARDADO Y RESTAURACIÓN ═══════════════════ */
