@@ -488,16 +488,24 @@ function freqOf(n){
 let _ctx=null;
 function ctx(){ if(!_ctx){ try{_ctx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){_ctx=null;} } return _ctx; }
 // ── cachés (ruido, impulsos de reverb, curvas de distorsión)
-let _noiseBuf=null;
+//    IMPORTANTE: los AudioBuffer están ligados al sample rate del contexto que los creó.
+//    El render offline (exportar audio) puede usar 44100 mientras el contexto en vivo usa 48000,
+//    así que estos cachés se indexan POR sample rate. Compartir un buffer entre contextos de
+//    distinta frecuencia hace que el ConvolverNode/BufferSource fallen o suenen desafinados.
+const _noiseBufBySR={};
 function noiseBuf(c){
-  if(!_noiseBuf){ const len=Math.floor(c.sampleRate*1.2); _noiseBuf=c.createBuffer(1,len,c.sampleRate);
-    const d=_noiseBuf.getChannelData(0); for(let i=0;i<len;i++)d[i]=Math.random()*2-1; }
-  return _noiseBuf;
+  const sr=c.sampleRate;
+  if(!_noiseBufBySR[sr]){
+    const len=Math.floor(sr*1.2), buf=c.createBuffer(1,len,sr);
+    const d=buf.getChannelData(0); for(let i=0;i<len;i++)d[i]=Math.random()*2-1;
+    _noiseBufBySR[sr]=buf;
+  }
+  return _noiseBufBySR[sr];
 }
 const _irCache={};
 function reverbIR(c,sec){
-  const k=(+sec||1.8).toFixed(2); if(_irCache[k])return _irCache[k];
-  const len=Math.max(64,Math.floor(c.sampleRate*(+sec||1.8))), buf=c.createBuffer(2,len,c.sampleRate);
+  const sr=c.sampleRate, k=sr+':'+(+sec||1.8).toFixed(2); if(_irCache[k])return _irCache[k];
+  const len=Math.max(64,Math.floor(sr*(+sec||1.8))), buf=c.createBuffer(2,len,sr);
   for(let ch=0;ch<2;ch++){const d=buf.getChannelData(ch); for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.2);}
   _irCache[k]=buf; return buf;
 }
@@ -934,7 +942,11 @@ function previewNote(inst,name,dur){
 //    Devuelve una Promise<AudioBuffer>. Base de la exportación de audio.
 function renderToBuffer(song,opts){
   opts=opts||{};
-  const SR=opts.sampleRate||44100;
+  // Por defecto, renderizar al MISMO sample rate del contexto en vivo: así el resultado
+  // suena idéntico a lo que se escucha y se evita cualquier desajuste con los buffers.
+  const liveSR=(_ctx&&_ctx.sampleRate)?_ctx.sampleRate:44100;
+  let SR=opts.sampleRate||liveSR;
+  if(!(SR>=8000&&SR<=96000))SR=44100; // sanear
   const spb=60/(song.bpm||120);
   const totalBeats=(song.bars||8)*(song.beatsPerBar||4);
   const passDur=totalBeats*spb;
@@ -2905,7 +2917,11 @@ function floatToInt16(f){ const o=new Int16Array(f.length);
   for(let i=0;i<f.length;i++){ let s=Math.max(-1,Math.min(1,f[i])); o[i]=s<0?s*0x8000:s*0x7FFF; } return o; }
 async function bufferToMp3(buf,kbps){
   if(!window.Mp3Encoder)throw new Error('Codificador MP3 no disponible');
-  const nCh=Math.min(2,buf.numberOfChannels), SR=buf.sampleRate;
+  // lamejs solo admite ciertos sample rates; si el buffer no coincide, avisamos claramente.
+  const OK_SR=[48000,44100,32000,24000,22050,16000,12000,11025,8000];
+  const nCh=Math.min(2,buf.numberOfChannels);
+  let SR=buf.sampleRate;
+  if(OK_SR.indexOf(SR)<0){ throw new Error('MP3 no admite '+SR+' Hz — exporta en WAV o usa 44100 Hz'); }
   const enc=new window.Mp3Encoder(nCh,SR,kbps||192);
   const L=floatToInt16(buf.getChannelData(0));
   const R=nCh>1?floatToInt16(buf.getChannelData(1)):L;
@@ -2935,7 +2951,12 @@ $('btn-render-audio').onclick=async()=>{
     const fmt=$('au-format').value;
     st.textContent='Sintetizando audio…';
     await new Promise(r=>setTimeout(r,30));
-    const buf=await VS.renderToBuffer(song,{repeats,layers:on.length?on:null,tail:3});
+    // Para MP3, garantizar un sample rate que el codificador admita (evita contextos a 88.2/96 kHz).
+    const OK_SR=[48000,44100,32000,24000,22050,16000,12000,11025,8000];
+    const liveSR=(VS.ctx()&&VS.ctx().sampleRate)?VS.ctx().sampleRate:44100;
+    const renderOpts={repeats,layers:on.length?on:null,tail:3};
+    if(fmt==='mp3' && OK_SR.indexOf(liveSR)<0){ renderOpts.sampleRate=44100; }
+    const buf=await VS.renderToBuffer(song,renderOpts);
     let blob,ext;
     if(fmt==='mp3'){ st.textContent='Codificando MP3…'; blob=await bufferToMp3(buf,+$('au-bitrate').value); ext='mp3'; }
     else { st.textContent='Escribiendo WAV…'; blob=bufferToWav(buf); ext='wav'; }
